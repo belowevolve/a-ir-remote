@@ -207,8 +207,12 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendText(text: String) {
-        action { client.text(text) }
+    fun launchYouTube() {
+        if (connected) {
+            action { client.launchYouTube() }
+        } else {
+            message = "Сначала подключите ТВ"
+        }
     }
 
     fun saveIr(value: String) {
@@ -274,12 +278,13 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 recorder = input
                 check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон не готов" }
                 input.startRecording()
-                val buffer = ByteArray(8192)
+                // 20 KiB gives the TV a stable stream; TvClient also pads a final chunk.
+                val buffer = ByteArray(20 * 1024)
                 val deadline = System.currentTimeMillis() + 30000
                 while ((currentCoroutineContext().isActive) && (System.currentTimeMillis() < deadline)) {
                     val count = input.read(buffer, 0, buffer.size)
                     check(count > 0) { "Ошибка записи микрофона: $count" }
-                    client.audio(id, buffer.copyOf(count).copyOf(8192))
+                    client.audio(id, buffer.copyOf(count))
                 }
             } finally {
                 recorder?.let { runCatching { it.stop() }; it.release() }

@@ -17,8 +17,6 @@ class TvClient(private val identity: TvIdentity) {
     @Volatile private var socket: SSLSocket? = null
     private var pairingSocket: SSLSocket? = null
     private var pairingHost = ""
-    private var imeCounter = 0
-    private var fieldCounter = 0
     private var features = 0
     private var voiceReady: CompletableDeferred<Int>? = null
     private val writeLock = Any()
@@ -70,7 +68,7 @@ class TvClient(private val identity: TvIdentity) {
     }
     fun cancelPairing() { pairingSocket?.close(); pairingSocket = null }
     fun close() { socket?.close(); socket = null; voiceReady?.cancel() }
-    fun listen(host: String, ready: () -> Unit, imeShown: (String) -> Unit) {
+    fun listen(host: String, ready: () -> Unit) {
         val s = open(host, 6466, false)
         socket = s
         try {
@@ -85,12 +83,6 @@ class TvClient(private val identity: TvIdentity) {
                     msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
                     msg.hasRemoteStart() -> ready()
-                    msg.hasRemoteImeBatchEdit() -> { imeCounter = msg.remoteImeBatchEdit.imeCounter; fieldCounter = msg.remoteImeBatchEdit.fieldCounter }
-                    msg.hasRemoteImeShowRequest() -> {
-                        val field = msg.remoteImeShowRequest.remoteTextFieldStatus
-                        fieldCounter = field.counterField
-                        imeShown(field.value)
-                    }
                     msg.hasRemoteVoiceBegin() -> voiceReady?.complete(msg.remoteVoiceBegin.sessionId)
                 }
             }
@@ -101,18 +93,10 @@ class TvClient(private val identity: TvIdentity) {
         message.writeDelimitedTo(s.outputStream); s.outputStream.flush()
     }
     fun key(code: Int) = send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(RemoteDirection.SHORT)).build())
-    fun text(value: String) {
-        require(value.isNotEmpty()) { "Введите текст" }
-        send(RemoteMessage.newBuilder().setRemoteImeBatchEdit(RemoteImeBatchEdit.newBuilder().setImeCounter(imeCounter).setFieldCounter(fieldCounter)
-            .addEditInfo(RemoteEditInfo.newBuilder().setInsert(1).setTextFieldStatus(RemoteImeObject.newBuilder().setStart(value.length - 1).setEnd(value.length - 1).setValue(value)))).build())
-    }
-    fun launchApp(appLinkOrPackage: String) {
-        require(appLinkOrPackage.isNotBlank()) { "Укажите package id приложения" }
+    fun launchYouTube() {
         check(features and 512 != 0) { "ТВ не поддерживает запуск приложений по сети" }
-        val link = if (appLinkOrPackage.contains("://")) appLinkOrPackage
-        else "market://launch?id=$appLinkOrPackage"
         send(RemoteMessage.newBuilder().setRemoteAppLinkLaunchRequest(
-            RemoteAppLinkLaunchRequest.newBuilder().setAppLink(link),
+            RemoteAppLinkLaunchRequest.newBuilder().setAppLink("https://www.youtube.com/tv"),
         ).build())
     }
     suspend fun startVoice(): Int {

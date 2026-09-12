@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -40,9 +39,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Mic
@@ -77,6 +74,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -128,7 +126,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
     var settings by remember { mutableStateOf(value = false) }
-    var keyboard by remember { mutableStateOf(value = false) }
     var more by remember { mutableStateOf(value = false) }
     var irSettings by remember { mutableStateOf(value = false) }
     val snackbar = remember { SnackbarHostState() }
@@ -172,30 +169,6 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
             }
 
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Panel)
-                    .clickable { settings = true }
-                    .padding(15.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .background(if (model.connected) Accent else Muted, CircleShape),
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = model.status,
-                    fontSize = 12.sp,
-                    color = if (model.connected) Accent else Muted,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(Icons.Rounded.ChevronRight, null, Modifier.size(18.dp), tint = Muted)
-            }
-
-            Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -208,6 +181,29 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     tint = Color(0xFFFF9696),
                 ) {
                     if (model.irPattern.isBlank()) irSettings = true else model.power()
+                }
+                Surface(
+                    onClick = model::launchYouTube,
+                    enabled = model.connected,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(68.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    color = Panel,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_youtube),
+                            contentDescription = "YouTube",
+                            tint = Color.Unspecified,
+                            modifier = Modifier.size(32.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("YouTube", fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
 
@@ -345,21 +341,13 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 }
             }
 
-            Row(
+            WideButton(
+                icon = if (model.recording) Icons.Rounded.Stop else Icons.Rounded.Mic,
+                label = if (model.recording) "Стоп" else "Голос",
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                WideButton(Icons.Rounded.Keyboard, "Клавиатура", Modifier.weight(1f)) {
-                    keyboard = true
-                }
-                WideButton(
-                    icon = if (model.recording) Icons.Rounded.Stop else Icons.Rounded.Mic,
-                    label = if (model.recording) "Стоп" else "Голос",
-                    modifier = Modifier.weight(1f),
-                    active = model.recording,
-                    onClick = voice,
-                )
-            }
+                active = model.recording,
+                onClick = voice,
+            )
         }
     }
 
@@ -448,33 +436,6 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     enabled = (pin.length == 6) && (!model.busy),
                 ) {
                     Text(if (model.busy) "Подключаем…" else "Подключить")
-                }
-            },
-        )
-    }
-
-    if (keyboard) {
-        var text by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { keyboard = false },
-            title = { Text("Текст на ТВ") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Сначала открой поле ввода на телевизоре.", color = Muted)
-                    OutlinedTextField(text, { text = it }, label = { Text("Текст") })
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { model.sendText(text) },
-                    enabled = text.isNotEmpty() && model.connected,
-                ) {
-                    Text("Отправить")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { keyboard = false }) {
-                    Text("Закрыть")
                 }
             },
         )
