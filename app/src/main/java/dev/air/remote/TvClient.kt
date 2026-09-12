@@ -70,7 +70,7 @@ class TvClient(private val identity: TvIdentity) {
     }
     fun cancelPairing() { pairingSocket?.close(); pairingSocket = null }
     fun close() { socket?.close(); socket = null; voiceReady?.cancel() }
-    fun listen(host: String, ready: () -> Unit) {
+    fun listen(host: String, ready: () -> Unit, imeShown: (String) -> Unit) {
         val s = open(host, 6466, false)
         socket = s
         try {
@@ -86,6 +86,11 @@ class TvClient(private val identity: TvIdentity) {
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
                     msg.hasRemoteStart() -> ready()
                     msg.hasRemoteImeBatchEdit() -> { imeCounter = msg.remoteImeBatchEdit.imeCounter; fieldCounter = msg.remoteImeBatchEdit.fieldCounter }
+                    msg.hasRemoteImeShowRequest() -> {
+                        val field = msg.remoteImeShowRequest.remoteTextFieldStatus
+                        fieldCounter = field.counterField
+                        imeShown(field.value)
+                    }
                     msg.hasRemoteVoiceBegin() -> voiceReady?.complete(msg.remoteVoiceBegin.sessionId)
                 }
             }
@@ -101,6 +106,15 @@ class TvClient(private val identity: TvIdentity) {
         send(RemoteMessage.newBuilder().setRemoteImeBatchEdit(RemoteImeBatchEdit.newBuilder().setImeCounter(imeCounter).setFieldCounter(fieldCounter)
             .addEditInfo(RemoteEditInfo.newBuilder().setInsert(1).setTextFieldStatus(RemoteImeObject.newBuilder().setStart(value.length - 1).setEnd(value.length - 1).setValue(value)))).build())
     }
+    fun launchApp(appLinkOrPackage: String) {
+        require(appLinkOrPackage.isNotBlank()) { "Укажите package id приложения" }
+        check(features and 512 != 0) { "ТВ не поддерживает запуск приложений по сети" }
+        val link = if (appLinkOrPackage.contains("://")) appLinkOrPackage
+        else "market://launch?id=$appLinkOrPackage"
+        send(RemoteMessage.newBuilder().setRemoteAppLinkLaunchRequest(
+            RemoteAppLinkLaunchRequest.newBuilder().setAppLink(link),
+        ).build())
+    }
     suspend fun startVoice(): Int {
         check(features and 8 != 0) { "ТВ не сообщил о поддержке голоса" }
         val deferred = CompletableDeferred<Int>(); voiceReady = deferred
@@ -111,6 +125,15 @@ class TvClient(private val identity: TvIdentity) {
             return id
         } finally { voiceReady = null }
     }
-    fun audio(id: Int, bytes: ByteArray) = send(RemoteMessage.newBuilder().setRemoteVoicePayload(RemoteVoicePayload.newBuilder().setSessionId(id).setSamples(ByteString.copyFrom(bytes))).build())
+    fun audio(id: Int, bytes: ByteArray) {
+        // Android TV Remote Service accepts chunks up to 20 KiB and some TVs reject
+        // chunks smaller than 8 KiB. Padding is applied after splitting.
+        bytes.asList().chunked(20 * 1024).forEach { chunk ->
+            val samples = chunk.toByteArray().let { if (it.size < 8 * 1024) it.copyOf(8 * 1024) else it }
+            send(RemoteMessage.newBuilder().setRemoteVoicePayload(
+                RemoteVoicePayload.newBuilder().setSessionId(id).setSamples(ByteString.copyFrom(samples)),
+            ).build())
+        }
+    }
     fun endVoice(id: Int) = send(RemoteMessage.newBuilder().setRemoteVoiceEnd(RemoteVoiceEnd.newBuilder().setSessionId(id)).build())
 }

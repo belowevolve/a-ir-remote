@@ -1,0 +1,10 @@
+<resources>
+    <!-- Android 12+ shows this window before Compose draws its first frame. -->
+    <style name="Theme.AirRemote" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#101216</item>
+        <item name="android:windowSplashScreenBackground">#101216</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">#BCED91</item>
+    </style>
+</resources>
