@@ -11,6 +11,7 @@ import java.security.cert.X509Certificate
 import java.security.interfaces.RSAPublicKey
 import javax.net.ssl.SSLSocket
 import kotlinx.coroutines.*
+import kotlin.time.Duration.Companion.seconds
 
 class TvClient(private val identity: TvIdentity) {
     @Volatile private var socket: SSLSocket? = null
@@ -42,7 +43,7 @@ class TvClient(private val identity: TvIdentity) {
         val s = open(host, 6467, true)
         pairingSocket = s; pairingHost = host
         try {
-            check(exchange(s, pairMessage().setPairingRequest(PairingRequest.newBuilder().setServiceName("atvremote").setClientName("Air Remote")).build()).hasPairingRequestAck())
+            check(exchange(s, pairMessage().setPairingRequest(PairingRequest.newBuilder().setServiceName("air_remote").setClientName("Air Remote")).build()).hasPairingRequestAck())
             val enc = Options.Encoding.newBuilder().setType(Options.Encoding.EncodingType.ENCODING_TYPE_HEXADECIMAL).setSymbolLength(6)
             check(exchange(s, pairMessage().setOptions(Options.newBuilder().setPreferredRole(Options.RoleType.ROLE_TYPE_INPUT).addInputEncodings(enc)).build()).hasOptions())
             check(exchange(s, pairMessage().setConfiguration(Configuration.newBuilder().setClientRole(Options.RoleType.ROLE_TYPE_INPUT).setEncoding(enc)).build()).hasConfigurationAck())
@@ -105,7 +106,7 @@ class TvClient(private val identity: TvIdentity) {
         val deferred = CompletableDeferred<Int>(); voiceReady = deferred
         try {
             key(84)
-            val id = withTimeout(5000) { deferred.await() }
+            val id = withTimeout(5.seconds) { deferred.await() }
             send(RemoteMessage.newBuilder().setRemoteVoiceBegin(RemoteVoiceBegin.newBuilder().setSessionId(id)).build())
             return id
         } finally { voiceReady = null }

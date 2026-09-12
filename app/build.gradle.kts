@@ -4,12 +4,6 @@ plugins {
     alias(libs.plugins.protobuf)
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(26)
-    }
-}
-
 android {
     namespace = "dev.air.remote"
     compileSdk = 37
@@ -26,9 +20,13 @@ android {
         compose = true
     }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.toVersion(26)
-        targetCompatibility = JavaVersion.toVersion(26)
+    sourceSets {
+        getByName("debug").java.directories += "build/generated/java/generateDebugProto/java"
+        getByName("release").java.directories += "build/generated/java/generateReleaseProto/java"
+    }
+
+    packaging {
+        jniLibs.keepDebugSymbols += "**/libandroidx.graphics.path.so"
     }
 
     buildTypes {
@@ -36,11 +34,6 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-        }
-        create("local") {
-            initWith(getByName("release"))
-            signingConfig = signingConfigs.getByName("debug")
-            matchingFallbacks += "release"
         }
     }
 }
@@ -50,8 +43,8 @@ protobuf {
         artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.get()}"
     }
     generateProtoTasks {
-        all().forEach { task ->
-            task.builtins {
+        all().configureEach {
+            builtins {
                 create("java") {
                     option("lite")
                 }
