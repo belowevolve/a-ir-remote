@@ -64,6 +64,7 @@ private fun PcScreen(model: PcRemoteModel) {
     var keyboardVisible by rememberSaveable { mutableStateOf(true) }
     var russian by rememberSaveable { mutableStateOf(false) }
     var launchError by remember { mutableStateOf("") }
+    var settingsVisible by rememberSaveable { mutableStateOf(false) }
     val bluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { model.start(); model.refreshDevices() }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (model.hasPermission()) { model.start(); devicesVisible = true } else model.permissionDenied()
@@ -96,6 +97,7 @@ private fun PcScreen(model: PcRemoteModel) {
         Trackpad(model, keyboardVisible)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { keyboardVisible = !keyboardVisible }) { Text("Клавиатура") }
+            TextButton(onClick = { settingsVisible = true }) { Text("Настройки") }
             TextButton(onClick = { russian = !russian }) { Text(if (russian) "RU" else "EN") }
         }
         if (keyboardVisible) {
@@ -126,6 +128,24 @@ private fun PcScreen(model: PcRemoteModel) {
         },
         confirmButton = { TextButton(onClick = { devicesVisible = false }) { Text("Готово") } },
     )
+    if (settingsVisible) {
+        AlertDialog(
+            onDismissRequest = { settingsVisible = false },
+            title = { Text("Тачпад") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Чувствительность: ${"%.1f".format(model.sensitivity)}×")
+                    Slider(
+                        value = model.sensitivity,
+                        onValueChange = model::updateSensitivity,
+                        valueRange = 0.6f..3.0f,
+                        steps = 11,
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { settingsVisible = false }) { Text("Готово") } },
+        )
+    }
 }
 
 @Composable
@@ -167,8 +187,8 @@ private fun Trackpad(model: PcRemoteModel, keyboardVisible: Boolean) {
                                     val steps = scroll.toInt()
                                     if (steps != 0) { model.move(0, 0, steps); scroll -= steps }
                                 } else if (fingers == 1) {
-                                    remainderX += dx / density
-                                    remainderY += dy / density
+                                    remainderX += dx / density * model.sensitivity
+                                    remainderY += dy / density * model.sensitivity
                                     val x = remainderX.toInt()
                                     val y = remainderY.toInt()
                                     if (x != 0 || y != 0) { model.move(x, y); remainderX -= x; remainderY -= y }

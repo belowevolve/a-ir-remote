@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.core.content.edit
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -39,6 +40,13 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     var modifiers by mutableIntStateOf(0)
         private set
     private val prefs = application.getSharedPreferences("pc_remote", Context.MODE_PRIVATE)
+    var sensitivity by mutableFloatStateOf(prefs.getFloat("sensitivity", 1.6f))
+        private set
+
+    fun updateSensitivity(value: Float) {
+        sensitivity = value.coerceIn(0.6f, 3.0f)
+        prefs.edit { putFloat("sensitivity", sensitivity) }
+    }
 
     fun hasPermission() = Build.VERSION.SDK_INT < 31 ||
         context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED

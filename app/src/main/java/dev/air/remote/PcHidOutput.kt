@@ -32,7 +32,7 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         dx += x; dy += y; wheel += scroll
         if (pointerPending) return
         pointerPending = true
-        schedule(TimeUnit.MILLISECONDS.toNanos(10), generation) {
+        schedule(TimeUnit.MILLISECONDS.toNanos(2), generation) {
             val report = synchronized(this) {
                 pointerPending = false
                 PcHidReports.mouse(buttons, dx, dy, wheel).also { dx = 0; dy = 0; wheel = 0 }
