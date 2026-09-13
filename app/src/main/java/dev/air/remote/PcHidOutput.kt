@@ -48,6 +48,12 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         schedule(0, generation) { transmit(PcHidReports.MOUSE, report) }
     }
 
+    @Synchronized fun consumer(value: Int) {
+        if (closed) return
+        schedule(0, generation) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer(value == 1, value == 2, value == 3)) }
+        schedule(TimeUnit.MILLISECONDS.toNanos(10), generation) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer()) }
+    }
+
     @Synchronized fun release() {
         if (closed) return
         generation++
@@ -58,6 +64,7 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         schedule(0, generation) {
             transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard())
             transmit(PcHidReports.MOUSE, PcHidReports.mouse())
+            transmit(PcHidReports.CONSUMER, PcHidReports.consumer())
         }
     }
 

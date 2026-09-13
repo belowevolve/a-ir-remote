@@ -1,5 +1,6 @@
 package dev.air.remote
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -82,6 +83,7 @@ import androidx.compose.ui.unit.sp
 class MainActivity : ComponentActivity() {
     private val model: RemoteModel by viewModels()
     private val pcModel: PcRemoteModel by viewModels()
+    private var pcMode = false
     private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
         if (isGranted) model.startVoice() else model.message = "Для голоса нужен доступ к микрофону"
     }
@@ -94,13 +96,34 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             RemoteTheme {
-                RemoteModes(pcModel, onPcActivated = { model.stopVoice(); model.hideKeyboard() }) {
+                RemoteModes(pcModel, onPcActivated = { model.stopVoice(); model.hideKeyboard() }, onModeChanged = { pcMode = it }) {
                     RemoteScreen(model) {
                         if (model.recording) model.stopVoice() else microphone.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 }
             }
         }
+    }
+
+    @SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_VOLUME_UP -> {
+                    if (pcMode) pcModel.volume(1) else model.key(24)
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    if (pcMode) pcModel.volume(2) else model.key(25)
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                    if (pcMode) pcModel.volume(3) else model.key(164)
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onStart() {

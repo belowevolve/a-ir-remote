@@ -109,6 +109,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             val report = when {
                 type == BluetoothHidDevice.REPORT_TYPE_INPUT && id.toInt() == PcHidReports.KEYBOARD -> PcHidReports.keyboard()
                 type == BluetoothHidDevice.REPORT_TYPE_INPUT && id.toInt() == PcHidReports.MOUSE -> PcHidReports.mouse(if (dragging) 1 else 0)
+                type == BluetoothHidDevice.REPORT_TYPE_INPUT && id.toInt() == PcHidReports.CONSUMER -> PcHidReports.consumer()
                 type == BluetoothHidDevice.REPORT_TYPE_OUTPUT && id.toInt() == PcHidReports.KEYBOARD -> byteArrayOf(0)
                 else -> null
             }
@@ -198,6 +199,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         modifiers = 0
     }
     fun toggleModifier(mask: Int) { if (connected) modifiers = modifiers xor mask }
+    fun volume(direction: Int) { if (connected) output?.consumer(direction) }
     fun move(x: Int, y: Int, wheel: Int = 0) { if (connected) output?.move(x, y, wheel) }
     fun click(right: Boolean = false) {
         if (!connected) return

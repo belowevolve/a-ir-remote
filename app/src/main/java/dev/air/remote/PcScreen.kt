@@ -31,9 +31,10 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 
 @Composable
-fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, tv: @Composable () -> Unit) {
+fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Boolean) -> Unit, tv: @Composable () -> Unit) {
     var pcMode by rememberSaveable { mutableStateOf(false) }
     DisposableEffect(pcMode) {
+        onModeChanged(pcMode)
         if (pcMode) { onPcActivated(); pc.activate() } else pc.deactivate()
         onDispose { pc.deactivate() }
     }
@@ -50,7 +51,7 @@ fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, tv: @Composable ()
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 FilterChip(selected = !pcMode, onClick = { pcMode = false }, label = { Text("ТВ") }, modifier = Modifier.weight(1f))
-                FilterChip(selected = pcMode, onClick = { pcMode = true }, label = { Text("ПК · Bluetooth") }, modifier = Modifier.weight(1f))
+                FilterChip(selected = pcMode, onClick = { pcMode = true }, label = { Text("ПК") }, modifier = Modifier.weight(1f))
             }
             Box(Modifier.weight(1f)) { if (pcMode) PcScreen(pc) else tv() }
         }

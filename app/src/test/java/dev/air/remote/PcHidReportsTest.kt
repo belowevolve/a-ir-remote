@@ -35,8 +35,9 @@ class PcHidReportsTest {
                 0x80, 0x90 -> { val key = id to (prefix and 0xFC); bits[key] = (bits[key] ?: 0) + size * count }
             }
         }
-        assertEquals(mapOf((1 to 0x80) to 64, (1 to 0x90) to 8, (2 to 0x80) to 32), bits)
+        assertEquals(mapOf((1 to 0x80) to 64, (1 to 0x90) to 8, (2 to 0x80) to 32, (3 to 0x80) to 8), bits)
         assertEquals(bits[1 to 0x80], PcHidReports.keyboard().size * 8)
         assertEquals(bits[2 to 0x80], PcHidReports.mouse().size * 8)
+        assertEquals(bits[3 to 0x80], PcHidReports.consumer().size * 8)
     }
 }
