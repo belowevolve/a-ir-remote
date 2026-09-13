@@ -85,6 +85,10 @@ private val Ink = Color(0xFF101216)
 private val Panel = Color(0xFF1C2027)
 private val Muted = Color(0xFF929AA7)
 private val Accent = Color(0xFFBCED91)
+private val RedButton = Color(0xFFE86A70)
+private val GreenButton = Color(0xFF63B978)
+private val YellowButton = Color(0xFFF0C85A)
+private val BlueButton = Color(0xFF62A9E8)
 
 class MainActivity : ComponentActivity() {
     private val model: RemoteModel by viewModels()
@@ -208,6 +212,16 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         Text("YouTube", fontWeight = FontWeight.SemiBold)
                     }
                 }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ColorButton(RedButton, Modifier.weight(1f)) { model.key(183) }
+                ColorButton(GreenButton, Modifier.weight(1f)) { model.key(184) }
+                ColorButton(YellowButton, Modifier.weight(1f)) { model.key(185) }
+                ColorButton(BlueButton, Modifier.weight(1f)) { model.key(186) }
             }
 
             BoxWithConstraints(
@@ -517,6 +531,26 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun ColorButton(
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    Surface(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
+        modifier = modifier.height(32.dp),
+        shape = RoundedCornerShape(13.dp),
+        color = color,
+    ) {
+        Box(contentAlignment = Alignment.Center) {}
     }
 }
 
