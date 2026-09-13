@@ -1,1 +1,5 @@
-<resources><color name="icon_background">#101216</color></resources>
+<resources>
+    <color name="icon_background">#FFFFFFFF</color>
+    <color name="icon_foreground">#BCED91</color>
+    <color name="icon_detail">#315318</color>
+</resources>
