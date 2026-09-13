@@ -85,7 +85,10 @@ class MainActivity : ComponentActivity() {
     private val pcModel: PcRemoteModel by viewModels()
     private var pcMode = false
     private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        if (isGranted) model.startVoice() else model.message = "Для голоса нужен доступ к микрофону"
+        if (isGranted) {
+            if (MicrophoneService.status.value.active) model.message = "Сначала останови микрофон для ПК"
+            else model.startVoice()
+        } else model.message = "Для голоса нужен доступ к микрофону"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

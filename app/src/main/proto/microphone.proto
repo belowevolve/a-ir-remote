@@ -1,0 +1,12 @@
+syntax = "proto3";
+package dev.air.remote.mic;
+option java_package = "dev.air.remote.mic";
+option java_outer_classname = "MicrophoneProtocol";
+
+// Wire-compatible with AndroidMic's AudioPacketMessage (TCP).
+message AudioPacket {
+  bytes buffer = 1;
+  uint32 sample_rate = 2;
+  uint32 channel_count = 3;
+  uint32 audio_format = 4;
+}

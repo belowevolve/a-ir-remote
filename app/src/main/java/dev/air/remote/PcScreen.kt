@@ -32,7 +32,8 @@ import kotlin.math.abs
 
 @Composable
 fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Boolean) -> Unit, tv: @Composable () -> Unit) {
-    var pcMode by rememberSaveable { mutableStateOf(false) }
+    var mode by rememberSaveable { mutableIntStateOf(if (MicrophoneService.status.value.active) 2 else 0) }
+    val pcMode = mode != 0
     DisposableEffect(pcMode) {
         onModeChanged(pcMode)
         if (pcMode) { onPcActivated(); pc.activate() } else pc.deactivate()
@@ -45,15 +46,22 @@ fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Bo
                     var distance = 0f
                     detectHorizontalDragGestures(
                         onDragStart = { distance = 0f },
-                        onDragEnd = { if (abs(distance) > 48.dp.toPx()) pcMode = distance < 0 },
+                        onDragEnd = { if (abs(distance) > 48.dp.toPx()) mode = (mode + if (distance < 0) 1 else -1).coerceIn(0, 2) },
                     ) { change, dx -> change.consume(); distance += dx }
                 },
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                FilterChip(selected = !pcMode, onClick = { pcMode = false }, label = { Text("ТВ") }, modifier = Modifier.weight(1f))
-                FilterChip(selected = pcMode, onClick = { pcMode = true }, label = { Text("ПК") }, modifier = Modifier.weight(1f))
+                FilterChip(selected = mode == 0, onClick = { mode = 0 }, label = { Text("ТВ") }, modifier = Modifier.weight(1f))
+                FilterChip(selected = mode == 1, onClick = { mode = 1 }, label = { Text("ПК") }, modifier = Modifier.weight(1f))
+                FilterChip(selected = mode == 2, onClick = { mode = 2 }, label = { Text("Микрофон") }, modifier = Modifier.weight(1.5f))
             }
-            Box(Modifier.weight(1f)) { if (pcMode) PcScreen(pc) else tv() }
+            Box(Modifier.weight(1f)) {
+                when (mode) {
+                    1 -> PcScreen(pc)
+                    2 -> MicrophoneScreen(beforeStart = onPcActivated)
+                    else -> tv()
+                }
+            }
         }
     }
 }
