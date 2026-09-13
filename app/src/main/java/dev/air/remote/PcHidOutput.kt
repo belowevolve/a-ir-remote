@@ -1,0 +1,77 @@
+package dev.air.remote
+
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+
+/** One output queue per connection. Pointer samples are combined before entering Bluetooth. */
+internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
+    private val worker = ScheduledThreadPoolExecutor(1).apply { removeOnCancelPolicy = true }
+    private var generation = 0
+    private var closed = false
+    private var nextKeyAt = 0L
+    private var pointerPending = false
+    private var dx = 0
+    private var dy = 0
+    private var wheel = 0
+    private var buttons = 0
+
+    @Synchronized fun key(code: Int, modifiers: Int): Boolean {
+        if (closed || worker.queue.size >= 30) return false
+        val now = System.nanoTime()
+        // Keep press/release distinct, without blocking the UI thread.
+        val start = maxOf(now, nextKeyAt)
+        val epoch = generation
+        schedule(start - now, epoch) { transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard(code, modifiers)) }
+        schedule(start - now + TimeUnit.MILLISECONDS.toNanos(10), epoch) { transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard()) }
+        nextKeyAt = start + TimeUnit.MILLISECONDS.toNanos(20)
+        return true
+    }
+
+    @Synchronized fun move(x: Int, y: Int, scroll: Int) {
+        if (closed) return
+        dx += x; dy += y; wheel += scroll
+        if (pointerPending) return
+        pointerPending = true
+        schedule(TimeUnit.MILLISECONDS.toNanos(10), generation) {
+            val report = synchronized(this) {
+                pointerPending = false
+                PcHidReports.mouse(buttons, dx, dy, wheel).also { dx = 0; dy = 0; wheel = 0 }
+            }
+            transmit(PcHidReports.MOUSE, report)
+        }
+    }
+
+    @Synchronized fun buttons(value: Int) {
+        if (closed) return
+        buttons = value
+        val report = PcHidReports.mouse(value)
+        schedule(0, generation) { transmit(PcHidReports.MOUSE, report) }
+    }
+
+    @Synchronized fun release() {
+        if (closed) return
+        generation++
+        worker.queue.clear()
+        nextKeyAt = 0
+        pointerPending = false
+        dx = 0; dy = 0; wheel = 0; buttons = 0
+        schedule(0, generation) {
+            transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard())
+            transmit(PcHidReports.MOUSE, PcHidReports.mouse())
+        }
+    }
+
+    @Synchronized fun close() {
+        if (closed) return
+        release()
+        closed = true
+        worker.shutdown()
+    }
+
+    private fun schedule(delay: Long, epoch: Int, action: () -> Unit) {
+        worker.schedule({
+            val current = synchronized(this) { epoch == generation }
+            if (current) action()
+        }, delay, TimeUnit.NANOSECONDS)
+    }
+}

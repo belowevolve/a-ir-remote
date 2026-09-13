@@ -24,8 +24,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -83,6 +81,7 @@ import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
     private val model: RemoteModel by viewModels()
+    private val pcModel: PcRemoteModel by viewModels()
     private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
         if (isGranted) model.startVoice() else model.message = "Для голоса нужен доступ к микрофону"
     }
@@ -95,8 +94,10 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             RemoteTheme {
-                RemoteScreen(model) {
-                    if (model.recording) model.stopVoice() else microphone.launch(Manifest.permission.RECORD_AUDIO)
+                RemoteModes(pcModel, onPcActivated = { model.stopVoice(); model.hideKeyboard() }) {
+                    RemoteScreen(model) {
+                        if (model.recording) model.stopVoice() else microphone.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 }
             }
         }
@@ -105,10 +106,12 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         model.resume()
+        pcModel.resume()
     }
 
     override fun onStop() {
         model.pause()
+        pcModel.pause()
         super.onStop()
     }
 }
@@ -133,12 +136,12 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
         containerColor = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground,
         snackbarHost = { SnackbarHost(snackbar) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .windowInsetsPadding(WindowInsets.systemBars)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .widthIn(max = 560.dp),
