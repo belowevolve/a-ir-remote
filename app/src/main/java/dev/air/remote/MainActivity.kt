@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,7 +62,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,15 +81,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val Ink = Color(0xFF101216)
-private val Panel = Color(0xFF1C2027)
-private val Muted = Color(0xFF929AA7)
-private val Accent = Color(0xFFBCED91)
-private val RedButton = Color(0xFFE86A70)
-private val GreenButton = Color(0xFF63B978)
-private val YellowButton = Color(0xFFF0C85A)
-private val BlueButton = Color(0xFF62A9E8)
-
 class MainActivity : ComponentActivity() {
     private val model: RemoteModel by viewModels()
     private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
@@ -103,14 +94,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Accent,
-                    background = Ink,
-                    surface = Panel,
-                    onPrimary = Ink,
-                ),
-            ) {
+            RemoteTheme {
                 RemoteScreen(model) {
                     if (model.recording) model.stopVoice() else microphone.launch(Manifest.permission.RECORD_AUDIO)
                 }
@@ -146,7 +130,8 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
     }
 
     Scaffold(
-        containerColor = Ink,
+        containerColor = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { paddingValues ->
         Column(
@@ -155,7 +140,8 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 .padding(paddingValues)
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .widthIn(max = 560.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -164,7 +150,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(model.tvName, fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
+                    Text(model.tvName, style = MaterialTheme.typography.headlineSmall)
                 }
                 RemoteButton(
                     icon = Icons.Rounded.Tune,
@@ -184,8 +170,8 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     icon = Icons.Rounded.PowerSettingsNew,
                     label = "Питание · ИК",
                     modifier = Modifier.size(68.dp),
-                    background = Color(0xFF382326),
-                    tint = Color(0xFFFF9696),
+                    background = RemoteColors.PowerContainer,
+                    tint = RemoteColors.Power,
                 ) {
                     if (model.irPattern.isBlank()) irSettings = true else model.power()
                 }
@@ -196,7 +182,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         .weight(1f)
                         .height(68.dp),
                     shape = RoundedCornerShape(22.dp),
-                    color = Panel,
+                    color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
                     Row(
                         horizontalArrangement = Arrangement.Center,
@@ -209,7 +195,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                             modifier = Modifier.size(32.dp),
                         )
                         Spacer(Modifier.width(10.dp))
-                        Text("YouTube", fontWeight = FontWeight.SemiBold)
+                            Text("YouTube", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
@@ -218,10 +204,10 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ColorButton(RedButton, Modifier.weight(1f)) { model.key(183) }
-                ColorButton(GreenButton, Modifier.weight(1f)) { model.key(184) }
-                ColorButton(YellowButton, Modifier.weight(1f)) { model.key(185) }
-                ColorButton(BlueButton, Modifier.weight(1f)) { model.key(186) }
+                ColorButton(RemoteColors.Red, Modifier.weight(1f)) { model.key(183) }
+                ColorButton(RemoteColors.Green, Modifier.weight(1f)) { model.key(184) }
+                ColorButton(RemoteColors.Yellow, Modifier.weight(1f)) { model.key(185) }
+                ColorButton(RemoteColors.Blue, Modifier.weight(1f)) { model.key(186) }
             }
 
             BoxWithConstraints(
@@ -233,8 +219,8 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     modifier = Modifier
                         .size(diameter)
                         .clip(CircleShape)
-                        .background(Panel)
-                        .border(1.dp, Color(0xFF2A3039), CircleShape),
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
                 ) {
                     RemoteButton(
                         icon = Icons.Rounded.KeyboardArrowUp,
@@ -286,14 +272,13 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                             .size(84.dp)
                             .align(Alignment.Center),
                         shape = CircleShape,
-                        color = Accent,
+                        color = MaterialTheme.colorScheme.primary,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
                                 text = "OK",
-                                color = Ink,
-                                fontSize = 23.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                style = MaterialTheme.typography.titleLarge,
                             )
                         }
                     }
@@ -324,7 +309,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         .weight(1f)
                         .height(62.dp)
                         .clip(RoundedCornerShape(22.dp))
-                        .background(Panel),
+                        .background(MaterialTheme.colorScheme.surfaceContainer),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
@@ -338,7 +323,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
                         contentDescription = "Громкость",
-                        tint = Muted,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(19.dp),
                     )
                     RemoteButton(
@@ -385,8 +370,8 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
             title = { Text("Телевизор") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(model.status, color = Muted)
-                    Text("Выбери ТВ в одной сети с телефоном.", color = Muted)
+                    Text(model.status, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Выбери ТВ в одной сети с телефоном.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     model.devices.forEach { (name, host) ->
                         TextButton(
                             onClick = {
@@ -417,7 +402,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     }
                     Text(
                         text = "ИК-передатчик: ${if (model.hasIr) "доступен" else "не найден"}",
-                        color = Muted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                     )
                 }
@@ -510,7 +495,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     Text("Передатчик ${if (model.hasIr) "доступен" else "не найден"}. Сигнал для твоего Haier ещё нужно проверить.")
                     Text(
                         text = "Направь верхний торец телефона на ТВ и нажми «Проверить». Если телевизор выключится или включится — сохрани профиль.",
-                        color = Muted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp,
                     )
                     Button(onClick = { model.testHaierPower() }) { Text("Проверить профиль Haier") }
@@ -559,7 +544,7 @@ private fun RemoteButton(
     icon: ImageVector,
     label: String,
     modifier: Modifier = Modifier,
-    background: Color = Panel,
+    background: Color = MaterialTheme.colorScheme.surfaceContainer,
     tint: Color = Color(0xFFE0E5EC),
     onClick: () -> Unit,
 ) {
@@ -591,15 +576,15 @@ private fun WideButton(
         onClick = onClick,
         modifier = modifier.height(64.dp),
         shape = RoundedCornerShape(22.dp),
-        color = if (active) Accent else Panel,
+        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Row(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, null, Modifier.size(22.dp), tint = if (active) Ink else Accent)
+            Icon(icon, null, Modifier.size(22.dp), tint = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(8.dp))
-            Text(label, fontSize = 13.sp, color = if (active) Ink else Color.White)
+            Text(label, fontSize = 13.sp, color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
         }
     }
 }
