@@ -149,8 +149,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         ))
     }
 
-    fun clearKeyboard() = editKeyboard(TextFieldValue())
-
     fun backspaceKeyboard(count: Int = 1) {
         if (!connected || count <= 0) return
         keyboardCommands.trySend(KeyboardCommand(connectionGeneration, keyboardEpoch, null, count))
