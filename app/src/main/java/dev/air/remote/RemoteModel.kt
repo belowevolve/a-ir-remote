@@ -16,6 +16,9 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.channels.Channel
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -34,21 +37,137 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     var busy by mutableStateOf(value = false)
     var recording by mutableStateOf(value = false)
     var message by mutableStateOf(value = "")
+    
+    var keyboardVisible by mutableStateOf(false)
+        private set
+    var keyboardValue by mutableStateOf(TextFieldValue())
+        private set
+    var keyboardInputType by mutableStateOf(1)
+        private set
+    var keyboardImeOptions by mutableStateOf(0)
+        private set
+
+    private var keyboardEpoch = 0L
+    private var keyboardRevision = 0L
+    private var connectionGeneration = 0L
+
+    private data class KeyboardCommand(val generation: Long, val epoch: Long, val value: KeyboardText?, val backspaces: Int = 0, val revision: Long = 0)
+    private val keyboardCommands = Channel<KeyboardCommand>(Channel.UNLIMITED)
+
     val devices = mutableStateListOf<Pair<String, String>>()
     private val prefs = app.getSharedPreferences("remote", Context.MODE_PRIVATE)
     var host by mutableStateOf(value = prefs.getString("host", "")!!)
     var tvName by mutableStateOf(value = prefs.getString("name", "Haier S2 Pro")!!)
     var irPattern by mutableStateOf(value = prefs.getString("ir", "")!!)
+    
     private val ir = app.getSystemService(ConsumerIrManager::class.java)
     val hasIr = ir?.hasIrEmitter() == true
+    
     private val identity by lazy { TvIdentity(app) }
     private val client by lazy { initialized = true; TvClient(identity) }
+    
     private var connectionJob: Job? = null
     private var voiceJob: Job? = null
     private val nsd = app.getSystemService(NsdManager::class.java)
     private var discovery: NsdManager.DiscoveryListener? = null
     private var foreground = false
     private var initialized = false
+
+    init {
+        viewModelScope.launch {
+            for (command in keyboardCommands) {
+                if (!connected || command.generation != connectionGeneration) continue
+                try {
+                    withContext(Dispatchers.IO) {
+                        if (command.backspaces > 0) client.backspaceKeyboard(command.epoch, command.backspaces)
+                        else if (command.value == null) client.submitKeyboard(command.epoch)
+                        else client.editKeyboard(command.epoch, command.revision, command.value)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    Log.e("AirRemote", "Keyboard sync failed", e)
+                    message = e.message ?: "Не удалось отправить ввод на ТВ"
+                }
+            }
+        }
+    }
+
+    private fun resetKeyboard() {
+        connectionGeneration++
+        keyboardVisible = false
+        keyboardValue = TextFieldValue()
+        keyboardEpoch = 0L
+        keyboardRevision = 0L
+    }
+
+    private fun receiveKeyboard(update: KeyboardUpdate) {
+        keyboardInputType = update.inputType
+        keyboardImeOptions = update.imeOptions
+        
+        if (update.epoch != keyboardEpoch || update.revision >= keyboardRevision) {
+            keyboardEpoch = update.epoch
+            keyboardRevision = update.revision
+            val text = update.value
+            val selection = TextRange(text.start, text.end)
+            if (keyboardValue.text != text.text || keyboardValue.selection != selection) {
+                keyboardValue = TextFieldValue(text.text, selection)
+            }
+        }
+
+        if (update.show) {
+            keyboardVisible = true
+        }
+    }
+
+    fun showKeyboard() {
+        if (!connected) {
+            message = "Сначала подключите ТВ"
+            connect()
+            return
+        }
+        keyboardVisible = true
+    }
+
+    fun hideKeyboard() {
+        keyboardVisible = false
+    }
+
+    fun editKeyboard(value: TextFieldValue) {
+        if (!connected) return
+        
+        val previous = keyboardValue
+        keyboardValue = value
+        
+        if (previous.text == value.text && previous.selection == value.selection) return
+        keyboardRevision++
+        
+        keyboardCommands.trySend(KeyboardCommand(
+            connectionGeneration,
+            keyboardEpoch, 
+            KeyboardText(value.text, value.selection.start, value.selection.end),
+            revision = keyboardRevision,
+        ))
+    }
+
+    fun clearKeyboard() = editKeyboard(TextFieldValue())
+
+    fun backspaceKeyboard(count: Int = 1) {
+        if (!connected || count <= 0) return
+        keyboardCommands.trySend(KeyboardCommand(connectionGeneration, keyboardEpoch, null, count))
+    }
+
+    fun deleteKeyboardCharacter() {
+        val value = keyboardValue
+        val end = value.selection.max
+        val start = if (value.selection.collapsed && end > 0) value.text.offsetByCodePoints(end, -1) else value.selection.min
+        if (start == end) backspaceKeyboard()
+        else editKeyboard(TextFieldValue(value.text.removeRange(start, end), TextRange(start)))
+    }
+
+    fun submitKeyboard() {
+        if (!connected) return
+        keyboardCommands.trySend(KeyboardCommand(connectionGeneration, keyboardEpoch, null))
+    }
 
     fun resume() {
         foreground = true
@@ -58,6 +177,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun pause() {
         foreground = false
+        resetKeyboard()
         stopVoice()
         connectionJob?.cancel()
         connectionJob = null
@@ -78,20 +198,19 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             override fun onServiceLost(service: NsdServiceInfo) = Unit
             override fun onServiceFound(service: NsdServiceInfo) {
                 @Suppress("DEPRECATION")
-                
                 nsd.resolveService(
                     service,
                     object : NsdManager.ResolveListener {
-                    override fun onResolveFailed(info: NsdServiceInfo, code: Int) = Unit
-                    override fun onServiceResolved(info: NsdServiceInfo) {
-                        val address = info.host?.hostAddress ?: return
-                        viewModelScope.launch {
-                            if (devices.none { it.second == address }) {
-                                devices.add(info.serviceName to address)
+                        override fun onResolveFailed(info: NsdServiceInfo, code: Int) = Unit
+                        override fun onServiceResolved(info: NsdServiceInfo) {
+                            val address = info.host?.hostAddress ?: return
+                            viewModelScope.launch {
+                                if (devices.none { it.second == address }) {
+                                    devices.add(info.serviceName to address)
+                                }
                             }
                         }
-                    }
-                },
+                    },
                 )
             }
         }
@@ -117,22 +236,26 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private fun action(block: suspend () -> Unit) = viewModelScope.launch {
         try {
             withContext(Dispatchers.IO) { block() }
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             message = e.message ?: "Ошибка соединения"
         }
     }
 
-    fun beginPairing() {
+    fun beginPairing(targetHost: String = host) {
+        if (targetHost.isBlank()) {
+            message = "Введите IP-адрес ТВ"
+            return
+        }
         if (busy) return
         busy = true
         connectionJob?.cancel()
         client.close()
         connected = false
+        resetKeyboard()
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { client.beginPairing(host) }
+                withContext(Dispatchers.IO) { client.beginPairing(targetHost) }
                 pairing = true
                 status = "Введите код с экрана ТВ"
             } catch (e: Exception) {
@@ -177,20 +300,27 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             }
             while (isActive) {
                 status = "Подключение…"
+                val generation = connectionGeneration
                 try {
                     withContext(Dispatchers.IO) {
-                        client.listen(host) {
+                        client.listen(host, onKeyboard = { update ->
                             viewModelScope.launch {
-                                connected = true
-                                status = "Подключён по Wi-Fi"
+                                if (foreground && generation == connectionGeneration) receiveKeyboard(update)
+                            }
+                        }) {
+                            viewModelScope.launch {
+                                if (foreground && generation == connectionGeneration) {
+                                    connected = true
+                                    status = "Подключён по Wi-Fi"
+                                }
                             }
                         }
                     }
-                } catch (e: CancellationException) {
-                    throw e
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     Log.w("AirRemote", "TV disconnected", e)
                     connected = false
+                    resetKeyboard()
                     status = "ТВ недоступен · ИК работает отдельно"
                 }
                 delay(3.seconds)
@@ -278,7 +408,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 recorder = input
                 check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон не готов" }
                 input.startRecording()
-                // 20 KiB gives the TV a stable stream; TvClient also pads a final chunk.
                 val buffer = ByteArray(20 * 1024)
                 val deadline = System.currentTimeMillis() + 30000
                 while ((currentCoroutineContext().isActive) && (System.currentTimeMillis() < deadline)) {
@@ -306,7 +435,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
 /** Portable format: carrier frequency in Hz followed by alternating on/off durations in µs. */
 object IrSignal {
-    // NEC address 0x04, command 0x08. Known Haier profile, requires device verification.
     fun haierPower(): String {
         val durations = mutableListOf(9000, 4500)
         for (byte in listOf(0x04, 0xfb, 0x08, 0xf7)) {

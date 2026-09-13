@@ -66,8 +66,19 @@ message RemoteImeShowRequest {
 }
 
 message RemoteEditInfo {
-  int32 insert = 1;
+  // IME operations are nested messages, not a boolean "insert" flag.
+  RemoteImeSelection selection = 1;
   RemoteImeObject text_field_status = 2;
+  RemoteImeAction editor_action = 5;
+}
+
+message RemoteImeSelection {
+  int32 start = 2;
+  int32 end = 3;
+}
+
+message RemoteImeAction {
+  int32 action = 1;
 }
 
 message RemoteImeObject {

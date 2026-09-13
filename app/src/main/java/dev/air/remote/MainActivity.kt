@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -67,6 +68,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -130,11 +132,12 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
     var irSettings by remember { mutableStateOf(value = false) }
     val snackbar = remember { SnackbarHostState() }
 
-    LaunchedEffect(model.message) {
-        if (model.message.isNotBlank()) {
-            val text = model.message
-            model.message = ""
-            snackbar.showSnackbar(text)
+    LaunchedEffect(Unit) {
+        snapshotFlow { model.message }.collect { text ->
+            if (text.isNotBlank()) {
+                model.message = ""
+                snackbar.showSnackbar(text)
+            }
         }
     }
 
@@ -341,15 +344,25 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 }
             }
 
-            WideButton(
-                icon = if (model.recording) Icons.Rounded.Stop else Icons.Rounded.Mic,
-                label = if (model.recording) "Стоп" else "Голос",
-                modifier = Modifier.fillMaxWidth(),
-                active = model.recording,
-                onClick = voice,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                WideButton(
+                    icon = Icons.Rounded.Keyboard,
+                    label = "Клавиатура",
+                    modifier = Modifier.weight(1f),
+                    onClick = model::showKeyboard,
+                )
+                WideButton(
+                    icon = if (model.recording) Icons.Rounded.Stop else Icons.Rounded.Mic,
+                    label = if (model.recording) "Стоп" else "Голос",
+                    modifier = Modifier.weight(1f),
+                    active = model.recording,
+                    onClick = voice,
+                )
+            }
         }
     }
+
+    if (model.keyboardVisible) KeyboardScreen(model)
 
     if (settings) {
         var address by remember { mutableStateOf(model.host) }
@@ -358,6 +371,7 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
             title = { Text("Телевизор") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(model.status, color = Muted)
                     Text("Выбери ТВ в одной сети с телефоном.", color = Muted)
                     model.devices.forEach { (name, host) ->
                         TextButton(

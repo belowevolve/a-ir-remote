@@ -1,5 +1,6 @@
 package dev.air.remote
 
+import android.util.Log
 import com.google.polo.wire.protobuf.PoloProto.*
 import com.google.protobuf.ByteString
 import com.google.protobuf.MessageLite
@@ -12,6 +13,9 @@ import java.security.interfaces.RSAPublicKey
 import javax.net.ssl.SSLSocket
 import kotlinx.coroutines.*
 import kotlin.time.Duration.Companion.seconds
+import kotlin.coroutines.EmptyCoroutineContext
+
+private const val IME_TAG = "AirRemoteIme"
 
 class TvClient(private val identity: TvIdentity) {
     @Volatile private var socket: SSLSocket? = null
@@ -20,6 +24,10 @@ class TvClient(private val identity: TvIdentity) {
     private var features = 0
     private var voiceReady: CompletableDeferred<Int>? = null
     private val writeLock = Any()
+    private val connectionLock = Any()
+    private var connectionVersion = 0L
+    private val keyboard = TvKeyboard()
+    
     private fun open(host: String, port: Int, pairing: Boolean): SSLSocket {
         val s = identity.context(host, pairing).socketFactory.createSocket() as SSLSocket
         try {
@@ -29,13 +37,16 @@ class TvClient(private val identity: TvIdentity) {
             return s
         } catch (e: Exception) { s.close(); throw e }
     }
+    
     private fun pairMessage() = OuterMessage.newBuilder().setProtocolVersion(2).setStatus(OuterMessage.Status.STATUS_OK)
+    
     private fun exchange(s: SSLSocket, msg: OuterMessage): OuterMessage {
         msg.writeDelimitedTo(s.outputStream); s.outputStream.flush()
         val reply = OuterMessage.parseDelimitedFrom(s.inputStream) ?: throw EOFException("ТВ закрыл сопряжение")
         check(reply.status == OuterMessage.Status.STATUS_OK) { "ТВ отклонил сопряжение: ${reply.status}" }
         return reply
     }
+    
     fun beginPairing(host: String) {
         cancelPairing()
         val s = open(host, 6467, true)
@@ -47,6 +58,7 @@ class TvClient(private val identity: TvIdentity) {
             check(exchange(s, pairMessage().setConfiguration(Configuration.newBuilder().setClientRole(Options.RoleType.ROLE_TYPE_INPUT).setEncoding(enc)).build()).hasConfigurationAck())
         } catch (e: Exception) { cancelPairing(); throw e }
     }
+    
     fun finishPairing(code: String) {
         require(code.matches(Regex("[0-9a-fA-F]{6}"))) { "Введите 6 символов с экрана ТВ" }
         val s = pairingSocket ?: error("Начните сопряжение заново")
@@ -66,17 +78,55 @@ class TvClient(private val identity: TvIdentity) {
         identity.pin(pairingHost, server)
         cancelPairing()
     }
+    
     fun cancelPairing() { pairingSocket?.close(); pairingSocket = null }
-    fun close() { socket?.close(); socket = null; voiceReady?.cancel() }
-    fun listen(host: String, ready: () -> Unit) {
+    
+    fun close() {
+        val closing = synchronized(connectionLock) {
+            connectionVersion++
+            socket.also { socket = null }
+        }
+        voiceReady?.cancel()
+        Dispatchers.IO.dispatch(EmptyCoroutineContext, Runnable { runCatching { closing?.close() } })
+    }
+    
+    fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, ready: () -> Unit) {
+        val version = synchronized(connectionLock) { connectionVersion }
         val s = open(host, 6466, false)
-        socket = s
         try {
+            synchronized(connectionLock) {
+                if (version != connectionVersion) throw CancellationException("Соединение отменено")
+                socket = s
+            }
+            synchronized(writeLock) {
+                if (socket !== s) throw CancellationException("Соединение отменено")
+                keyboard.reset()
+                onKeyboard(keyboard.snapshot())
+            }
             while (!s.isClosed) {
                 val msg = RemoteMessage.parseDelimitedFrom(s.inputStream) ?: throw EOFException("Соединение с ТВ закрыто")
+                if (Log.isLoggable(IME_TAG, Log.DEBUG)) {
+                    if (msg.hasRemoteImeKeyInject()) {
+                        val ime = msg.remoteImeKeyInject
+                        Log.d(IME_TAG, "context app=${ime.appInfo.counter} type=${ime.appInfo.int2} action=${ime.appInfo.int3} field=${ime.textFieldStatus.counterField} length=${ime.textFieldStatus.value.length} selection=${ime.textFieldStatus.start}:${ime.textFieldStatus.end} present=${ime.hasTextFieldStatus()}")
+                    }
+                    if (msg.hasRemoteImeShowRequest()) {
+                        val field = msg.remoteImeShowRequest.remoteTextFieldStatus
+                        Log.d(IME_TAG, "show field=${field.counterField} length=${field.value.length} selection=${field.start}:${field.end}")
+                    }
+                    if (msg.hasRemoteImeBatchEdit()) {
+                        val batch = msg.remoteImeBatchEdit
+                        Log.d(IME_TAG, "batch ime=${batch.imeCounter} field=${batch.fieldCounter} edits=${batch.editInfoCount}")
+                    }
+                }
+                synchronized(writeLock) {
+                    if (socket === s) {
+                        keyboard.receive(msg)?.let(onKeyboard)
+                    }
+                }
                 when {
                     msg.hasRemoteConfigure() -> {
-                        features = msg.remoteConfigure.code1 and  (1 or 2 or 4 or 8 or 16 or 32 or 64 or 512)
+                        features = msg.remoteConfigure.code1 and (1 or 2 or 4 or 8 or 16 or 32 or 64 or 512)
                         send(RemoteMessage.newBuilder().setRemoteConfigure(RemoteConfigure.newBuilder().setCode1(features)
                             .setDeviceInfo(RemoteDeviceInfo.newBuilder().setUnknown1(1).setUnknown2("1").setPackageName("dev.air.remote").setAppVersion("0.1"))).build())
                     }
@@ -86,19 +136,47 @@ class TvClient(private val identity: TvIdentity) {
                     msg.hasRemoteVoiceBegin() -> voiceReady?.complete(msg.remoteVoiceBegin.sessionId)
                 }
             }
-        } finally { s.close(); if (socket === s) socket = null }
+        } finally {
+            synchronized(connectionLock) { if (socket === s) socket = null }
+            s.close()
+        }
     }
+    
     private fun send(message: MessageLite) = synchronized(writeLock) {
         val s = socket ?: error("Нет соединения с ТВ")
         message.writeDelimitedTo(s.outputStream); s.outputStream.flush()
     }
+    
+    fun editKeyboard(epoch: Long, revision: Long, value: KeyboardText) = synchronized(writeLock) {
+        check(features and 4 != 0) { "ТВ не поддерживает ввод текста по сети" }
+        keyboard.edit(epoch, value, revision)?.let {
+            if (Log.isLoggable(IME_TAG, Log.DEBUG)) {
+                Log.d(IME_TAG, "send ime=${it.remoteImeBatchEdit.imeCounter} field=${it.remoteImeBatchEdit.fieldCounter} edits=${it.remoteImeBatchEdit.editInfoCount} length=${value.text.length}")
+            }
+            send(it)
+        }
+    }
+
+    fun submitKeyboard(epoch: Long) = synchronized(writeLock) { keyboard.submit(epoch)?.let { send(it) } }
+
+    fun backspaceKeyboard(epoch: Long, count: Int) = synchronized(writeLock) {
+        keyboard.backspace(epoch)?.let { command ->
+            if (Log.isLoggable(IME_TAG, Log.DEBUG)) {
+                Log.d(IME_TAG, "backspace count=$count")
+            }
+            repeat(count) { send(command) }
+        }
+    }
+    
     fun key(code: Int) = send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(RemoteDirection.SHORT)).build())
+    
     fun launchYouTube() {
         check(features and 512 != 0) { "ТВ не поддерживает запуск приложений по сети" }
         send(RemoteMessage.newBuilder().setRemoteAppLinkLaunchRequest(
             RemoteAppLinkLaunchRequest.newBuilder().setAppLink("https://www.youtube.com/tv"),
         ).build())
     }
+    
     suspend fun startVoice(): Int {
         check(features and 8 != 0) { "ТВ не сообщил о поддержке голоса" }
         val deferred = CompletableDeferred<Int>(); voiceReady = deferred
@@ -109,9 +187,8 @@ class TvClient(private val identity: TvIdentity) {
             return id
         } finally { voiceReady = null }
     }
+    
     fun audio(id: Int, bytes: ByteArray) {
-        // Android TV Remote Service accepts chunks up to 20 KiB and some TVs reject
-        // chunks smaller than 8 KiB. Padding is applied after splitting.
         bytes.asList().chunked(20 * 1024).forEach { chunk ->
             val samples = chunk.toByteArray().let { if (it.size < 8 * 1024) it.copyOf(8 * 1024) else it }
             send(RemoteMessage.newBuilder().setRemoteVoicePayload(
@@ -119,5 +196,6 @@ class TvClient(private val identity: TvIdentity) {
             ).build())
         }
     }
+    
     fun endVoice(id: Int) = send(RemoteMessage.newBuilder().setRemoteVoiceEnd(RemoteVoiceEnd.newBuilder().setSessionId(id)).build())
 }
