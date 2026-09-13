@@ -37,6 +37,35 @@ class PcHidOutputTest {
         } finally { output.close() }
     }
 
+    @Test fun largePointerMovementIsSplitWithoutLosingDistance() {
+        val reports = Collections.synchronizedList(mutableListOf<ByteArray>())
+        val sent = CountDownLatch(3)
+        val output = PcHidOutput { id, bytes ->
+            if (id == PcHidReports.MOUSE) { reports.add(bytes); sent.countDown() }
+        }
+        try {
+            output.move(300, -280, 0)
+            assertTrue(sent.await(2, TimeUnit.SECONDS))
+            assertEquals(300, reports.sumOf { it[1].toInt() })
+            assertEquals(-280, reports.sumOf { it[2].toInt() })
+        } finally { output.close() }
+    }
+
+    @Test fun standaloneWindowsSendsModifierThenReleasesIt() {
+        val reports = Collections.synchronizedList(mutableListOf<ByteArray>())
+        val sent = CountDownLatch(2)
+        val output = PcHidOutput { id, bytes ->
+            if (id == PcHidReports.KEYBOARD) { reports.add(bytes); sent.countDown() }
+        }
+        try {
+            output.key(0, 8)
+            assertTrue(sent.await(2, TimeUnit.SECONDS))
+            assertEquals(8, reports[0][0].toInt())
+            assertTrue(reports[0].drop(1).all { it == 0.toByte() })
+            assertTrue(reports[1].all { it == 0.toByte() })
+        } finally { output.close() }
+    }
+
     @Test fun releaseDropsQueuedKeysEvenWhenBluetoothIsBlocked() {
         val entered = CountDownLatch(1)
         val unblock = CountDownLatch(1)

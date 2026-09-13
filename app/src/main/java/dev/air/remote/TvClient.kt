@@ -31,9 +31,13 @@ class TvClient(private val identity: TvIdentity) {
     private fun open(host: String, port: Int, pairing: Boolean): SSLSocket {
         val s = identity.context(host, pairing).socketFactory.createSocket() as SSLSocket
         try {
+            s.tcpNoDelay = true
+            s.keepAlive = true
             s.soTimeout = 12000
             s.connect(InetSocketAddress(host, port), 5000)
             s.startHandshake()
+            // Pairing stays bounded; the remote service may be quiet between heartbeats.
+            if (!pairing) s.soTimeout = 65000
             return s
         } catch (e: Exception) { s.close(); throw e }
     }
@@ -168,7 +172,7 @@ class TvClient(private val identity: TvIdentity) {
         }
     }
     
-    fun key(code: Int) = send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(RemoteDirection.SHORT)).build())
+    fun key(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) = send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
     
     fun launchYouTube() {
         check(features and 512 != 0) { "ТВ не поддерживает запуск приложений по сети" }

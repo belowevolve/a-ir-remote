@@ -51,8 +51,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private var keyboardRevision = 0L
     private var connectionGeneration = 0L
 
-    private data class KeyboardCommand(val generation: Long, val epoch: Long, val value: KeyboardText?, val backspaces: Int = 0, val revision: Long = 0)
-    private val keyboardCommands = Channel<KeyboardCommand>(Channel.UNLIMITED)
+    private data class TvCommand(val generation: Long, val epoch: Long, val value: KeyboardText?, val backspaces: Int = 0, val revision: Long = 0, val action: (TvClient.() -> Unit)? = null)
+    private val commands = Channel<TvCommand>(Channel.UNLIMITED)
 
     val devices = mutableStateListOf<Pair<String, String>>()
     private val prefs = app.getSharedPreferences("remote", Context.MODE_PRIVATE)
@@ -75,18 +75,20 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            for (command in keyboardCommands) {
+            for (command in commands) {
                 if (!connected || command.generation != connectionGeneration) continue
                 try {
                     withContext(Dispatchers.IO) {
-                        if (command.backspaces > 0) client.backspaceKeyboard(command.epoch, command.backspaces)
+                        if (command.action != null) command.action.invoke(client)
+                        else if (command.backspaces > 0) client.backspaceKeyboard(command.epoch, command.backspaces)
                         else if (command.value == null) client.submitKeyboard(command.epoch)
                         else client.editKeyboard(command.epoch, command.revision, command.value)
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
-                    Log.e("AirRemote", "Keyboard sync failed", e)
-                    message = e.message ?: "Не удалось отправить ввод на ТВ"
+                    Log.e("AirRemote", "TV command failed", e)
+                    if (e is java.io.IOException) client.close()
+                    message = e.message ?: "Не удалось отправить команду на ТВ"
                 }
             }
         }
@@ -141,7 +143,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (previous.text == value.text && previous.selection == value.selection) return
         keyboardRevision++
         
-        keyboardCommands.trySend(KeyboardCommand(
+        commands.trySend(TvCommand(
             connectionGeneration,
             keyboardEpoch, 
             KeyboardText(value.text, value.selection.start, value.selection.end),
@@ -151,7 +153,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun backspaceKeyboard(count: Int = 1) {
         if (!connected || count <= 0) return
-        keyboardCommands.trySend(KeyboardCommand(connectionGeneration, keyboardEpoch, null, count))
+        commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null, count))
     }
 
     fun deleteKeyboardCharacter() {
@@ -164,7 +166,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun submitKeyboard() {
         if (!connected) return
-        keyboardCommands.trySend(KeyboardCommand(connectionGeneration, keyboardEpoch, null))
+        commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null))
     }
 
     fun resume() {
@@ -326,9 +328,18 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // All user commands share one FIFO, including keyboard edits and held-key edges.
+    private fun enqueue(action: TvClient.() -> Unit) {
+        if (connected) commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null, action = action))
+    }
+
+    fun holdOk(pressed: Boolean) {
+        enqueue { key(23, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+    }
+
     fun key(code: Int) {
         if (connected) {
-            action { client.key(code) }
+            enqueue { key(code) }
         } else {
             message = "Сначала подключите ТВ"
             connect()
@@ -337,7 +348,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun launchYouTube() {
         if (connected) {
-            action { client.launchYouTube() }
+            enqueue { launchYouTube() }
         } else {
             message = "Сначала подключите ТВ"
         }

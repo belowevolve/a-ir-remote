@@ -30,14 +30,31 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
     @Synchronized fun move(x: Int, y: Int, scroll: Int) {
         if (closed) return
         dx += x; dy += y; wheel += scroll
-        if (pointerPending) return
+        schedulePointer()
+    }
+
+    private fun schedulePointer() {
+        if (pointerPending || (dx == 0 && dy == 0 && wheel == 0)) return
         pointerPending = true
-        schedule(TimeUnit.MILLISECONDS.toNanos(2), generation) {
+        val epoch = generation
+        // At most 125 reports/s; do not flood Bluetooth with every touch sample.
+        schedule(TimeUnit.MILLISECONDS.toNanos(8), epoch) {
             val report = synchronized(this) {
-                pointerPending = false
-                PcHidReports.mouse(buttons, dx, dy, wheel).also { dx = 0; dy = 0; wheel = 0 }
+                if (epoch != generation) return@schedule
+                val x = dx.coerceIn(-127, 127)
+                val y = dy.coerceIn(-127, 127)
+                val scroll = wheel.coerceIn(-127, 127)
+                dx -= x; dy -= y; wheel -= scroll
+                PcHidReports.mouse(buttons, x, y, scroll)
             }
             transmit(PcHidReports.MOUSE, report)
+            synchronized(this) {
+                if (epoch == generation) {
+                    pointerPending = false
+                    // Schedule from completion, so a slow transport cannot cause a burst.
+                    schedulePointer()
+                }
+            }
         }
     }
 

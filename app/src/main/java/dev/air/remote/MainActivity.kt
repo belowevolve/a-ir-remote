@@ -37,17 +37,23 @@ import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
@@ -145,7 +151,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
     var settings by remember { mutableStateOf(value = false) }
-    var more by remember { mutableStateOf(value = false) }
     var irSettings by remember { mutableStateOf(value = false) }
     val snackbar = remember { SnackbarHostState() }
 
@@ -227,6 +232,11 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                             Text("YouTube", style = MaterialTheme.typography.titleMedium)
                     }
                 }
+                RemoteButton(
+                    icon = Icons.AutoMirrored.Rounded.VolumeOff,
+                    label = "Без звука",
+                    modifier = Modifier.size(68.dp),
+                ) { model.key(164) }
             }
 
             Row(
@@ -296,10 +306,29 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         model.key(22)
                     }
                     Surface(
-                        onClick = { model.key(23) },
                         modifier = Modifier
                             .size(84.dp)
-                            .align(Alignment.Center),
+                            .align(Alignment.Center)
+                            .semantics { onClick("OK") { model.key(23); true } }
+                            .pointerInput(model.connected) {
+                                detectTapGestures(onPress = {
+                                    coroutineScope {
+                                        var held = false
+                                        val timer = launch {
+                                            delay(viewConfiguration.longPressTimeoutMillis)
+                                            held = true
+                                            model.holdOk(true)
+                                        }
+                                        try {
+                                            val released = tryAwaitRelease()
+                                            if (released && !held) model.key(23)
+                                        } finally {
+                                            timer.cancel()
+                                            if (held) model.holdOk(false)
+                                        }
+                                    }
+                                })
+                            },
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primary,
                     ) {
@@ -324,52 +353,20 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 RemoteButton(icon = Icons.Rounded.Home, label = "Домой") {
                     model.key(3)
                 }
-                RemoteButton(icon = Icons.Rounded.MoreHoriz, label = "Ещё") {
-                    more = true
+                RemoteButton(icon = Icons.Rounded.Settings, label = "Настройки ТВ") {
+                    model.key(176)
                 }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(62.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainer),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    RemoteButton(
-                        icon = Icons.Rounded.Remove,
-                        label = "Тише",
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        model.key(25)
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
-                        contentDescription = "Громкость",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp),
-                    )
-                    RemoteButton(
-                        icon = Icons.Rounded.Add,
-                        label = "Громче",
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        model.key(24)
-                    }
-                }
-                RemoteButton(
-                    icon = Icons.AutoMirrored.Rounded.VolumeOff,
-                    label = "Без звука",
-                    modifier = Modifier.size(62.dp),
-                ) {
-                    model.key(164)
-                }
+                RemoteButton(Icons.Rounded.SkipPrevious, "Предыдущий", Modifier.weight(1f)) { model.key(88) }
+                RemoteButton(Icons.Rounded.FastRewind, "Перемотка назад", Modifier.weight(1f)) { model.key(89) }
+                RemoteButton(Icons.Rounded.PlayArrow, "Пауза / воспроизведение", Modifier.weight(1f)) { model.key(85) }
+                RemoteButton(Icons.Rounded.FastForward, "Перемотка вперёд", Modifier.weight(1f)) { model.key(90) }
+                RemoteButton(Icons.Rounded.SkipNext, "Следующий", Modifier.weight(1f)) { model.key(87) }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -429,6 +426,10 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     ) {
                         Text("Настроить ИК-питание")
                     }
+                    TextButton(onClick = { model.key(178) }) { Text("Входы / HDMI") }
+                    TextButton(onClick = { model.key(166) }) { Text("Следующий канал") }
+                    TextButton(onClick = { model.key(167) }) { Text("Предыдущий канал") }
+                    TextButton(onClick = { model.key(223) }) { Text("Выключить по Wi-Fi") }
                     Text(
                         text = "ИК-передатчик: ${if (model.hasIr) "доступен" else "не найден"}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -478,38 +479,6 @@ private fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     enabled = (pin.length == 6) && (!model.busy),
                 ) {
                     Text(if (model.busy) "Подключаем…" else "Подключить")
-                }
-            },
-        )
-    }
-
-    if (more) {
-        AlertDialog(
-            onDismissRequest = { more = false },
-            title = { Text("Управление") },
-            text = {
-                Column {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        RemoteButton(icon = Icons.Rounded.FastRewind, label = "Перемотка назад") {
-                            model.key(89)
-                        }
-                        RemoteButton(icon = Icons.Rounded.PlayArrow, label = "Пауза / воспроизведение") {
-                            model.key(85)
-                        }
-                        RemoteButton(icon = Icons.Rounded.FastForward, label = "Перемотка вперёд") {
-                            model.key(90)
-                        }
-                    }
-                    TextButton(onClick = { model.key(178) }) { Text("Входы / HDMI") }
-                    TextButton(onClick = { model.key(176) }) { Text("Настройки ТВ") }
-                    TextButton(onClick = { model.key(166) }) { Text("Следующий канал") }
-                    TextButton(onClick = { model.key(167) }) { Text("Предыдущий канал") }
-                    TextButton(onClick = { model.key(223); more = false }) { Text("Выключить по Wi-Fi") }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { more = false }) {
-                    Text("Готово")
                 }
             },
         )

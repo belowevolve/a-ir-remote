@@ -40,15 +40,17 @@ fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Bo
         onDispose { pc.deactivate() }
     }
     Surface(modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp).pointerInput(Unit) {
-                    var distance = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { distance = 0f },
-                        onDragEnd = { if (abs(distance) > 48.dp.toPx()) mode = (mode + if (distance < 0) 1 else -1).coerceIn(0, 2) },
-                    ) { change, dx -> change.consume(); distance += dx }
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).pointerInput(Unit) {
+            var distance = 0f
+            detectHorizontalDragGestures(
+                onDragStart = { distance = 0f },
+                onDragEnd = {
+                    if (abs(distance) > 48.dp.toPx()) mode = (mode + if (distance < 0) 1 else -1).coerceIn(0, 2)
                 },
+            ) { change, dx -> change.consume(); distance += dx }
+        }) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 FilterChip(selected = mode == 0, onClick = { mode = 0 }, label = { Text("ТВ") }, modifier = Modifier.weight(1f))
@@ -164,7 +166,6 @@ private fun Trackpad(model: PcRemoteModel, keyboardVisible: Boolean) {
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .semantics { contentDescription = "Трекпад" }
             .pointerInput(model.connected) {
-                if (!model.connected) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     down.consume()
@@ -247,11 +248,15 @@ private fun PcKeyboard(model: PcRemoteModel, russian: Boolean) {
                     PcKey(label, Modifier.weight(1f), model.connected) { model.key(code) }
                 }
             }
-            Column(Modifier.align(Alignment.End).width(132.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                PcKey("↑", Modifier.align(Alignment.CenterHorizontally).width(42.dp), model.connected) { model.key(82) }
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    listOf("←" to 80, "↓" to 81, "→" to 79).forEach { (label, code) ->
-                        PcKey(label, Modifier.weight(1f), model.connected) { model.key(code) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                PcKey("Win", Modifier.width(64.dp), model.connected) { model.windowsKey() }
+                Spacer(Modifier.weight(1f))
+                Column(Modifier.width(132.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    PcKey("↑", Modifier.align(Alignment.CenterHorizontally).width(42.dp), model.connected) { model.key(82) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        listOf("←" to 80, "↓" to 81, "→" to 79).forEach { (label, code) ->
+                            PcKey(label, Modifier.weight(1f), model.connected) { model.key(code) }
+                        }
                     }
                 }
             }

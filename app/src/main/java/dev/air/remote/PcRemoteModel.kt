@@ -206,6 +206,11 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         if (output?.key(code, modifiers) != true) status = "Bluetooth не успевает отправлять. Переподключи ПК"
         modifiers = 0
     }
+    fun windowsKey() {
+        if (!connected) return
+        if (output?.key(0, 8) != true) status = "Bluetooth не успевает отправлять. Переподключи ПК"
+        modifiers = 0
+    }
     fun toggleModifier(mask: Int) { if (connected) modifiers = modifiers xor mask }
     fun volume(direction: Int) { if (connected) output?.consumer(direction) }
     fun move(x: Int, y: Int, wheel: Int = 0) { if (connected) output?.move(x, y, wheel) }
