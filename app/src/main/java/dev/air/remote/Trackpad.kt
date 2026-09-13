@@ -18,10 +18,10 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 
 @Composable
-internal fun Trackpad(model: PcRemoteModel, keyboardVisible: Boolean) {
+internal fun Trackpad(model: PcRemoteModel, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier.fillMaxWidth().height(if (keyboardVisible) 190.dp else 320.dp)
-            .clip(RoundedCornerShape(16.dp))
+        modifier = modifier.fillMaxWidth()
+            .clip(KeyboardLayout.TrackpadShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .semantics { contentDescription = "Трекпад" }
             .pointerInput(model.connected) {

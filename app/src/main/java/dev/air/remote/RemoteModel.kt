@@ -357,9 +357,13 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun holdPower(pressed: Boolean) {
+        enqueue { key(26, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+    }
+
     fun power() {
+        if (!hasIr) { key(26); return }
         action {
-            check(hasIr) { "В телефоне нет ИК-передатчика" }
             val signal = powerSignal
             ir.transmit(signal.first, signal.second)
         }

@@ -31,6 +31,8 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         private set
     var connected by mutableStateOf(false)
         private set
+    var deviceName by mutableStateOf("Компьютер")
+        private set
     var status by mutableStateOf("Подключи компьютер по Bluetooth")
         private set
     var devices by mutableStateOf<List<BluetoothDevice>>(emptyList())
@@ -96,6 +98,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     host = device
+                    deviceName = device.name ?: "Компьютер"
                     connected = true
                     status = "${device.name ?: "Компьютер"} · подключён"
                     prefs.edit { putString("host", device.address) }

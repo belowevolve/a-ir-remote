@@ -1,5 +1,17 @@
 package dev.air.remote
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,7 +21,6 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -22,7 +33,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
@@ -37,14 +47,15 @@ internal fun ColorButton(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onClick()
         },
-        modifier = modifier.height(32.dp),
-        shape = RoundedCornerShape(13.dp),
+        modifier = modifier.height(TvLayout.ColorKeyHeight),
+        shape = TvLayout.ColorKeyShape,
         color = color,
     ) {
         Box(contentAlignment = Alignment.Center) {}
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun RemoteButton(
     icon: ImageVector,
@@ -52,20 +63,48 @@ internal fun RemoteButton(
     modifier: Modifier = Modifier,
     background: Color = MaterialTheme.colorScheme.surfaceContainer,
     tint: Color = Color(0xFFE0E5EC),
+    onHold: ((Boolean) -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
+    val click by rememberUpdatedState(onClick)
+    val hold by rememberUpdatedState(onHold)
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "button press")
+    val input = if (onHold == null) Modifier.combinedClickable(
+        onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); click() },
+    ) else Modifier.semantics { onClick(label) { click(); true } }.pointerInput(Unit) {
+        detectTapGestures(onPress = {
+            coroutineScope {
+                pressed = true
+                var held = false
+                val timer = launch {
+                    delay(viewConfiguration.longPressTimeoutMillis)
+                    held = true
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    hold?.invoke(true)
+                }
+                try {
+                    if (tryAwaitRelease() && !held) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        click()
+                    }
+                } finally {
+                    timer.cancel()
+                    if (held) hold?.invoke(false)
+                    pressed = false
+                }
+            }
+        })
+    }
     Surface(
-        onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onClick()
-        },
-        modifier = modifier.defaultMinSize(minWidth = 62.dp, minHeight = 62.dp),
-        shape = RoundedCornerShape(22.dp),
+        modifier = modifier.defaultMinSize(minWidth = RemoteLayout.ActionSize, minHeight = RemoteLayout.ActionSize)
+            .scale(scale).clip(RemoteLayout.ActionShape).then(input),
+        shape = RemoteLayout.ActionShape,
         color = background,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(icon, label, Modifier.size(28.dp), tint = tint)
+            Icon(icon, label, Modifier.size(RemoteLayout.ActionIconSize), tint = tint)
         }
     }
 }
@@ -80,16 +119,16 @@ internal fun WideButton(
 ) {
     Surface(
         onClick = onClick,
-        modifier = modifier.height(64.dp),
-        shape = RoundedCornerShape(22.dp),
+        modifier = modifier.height(RemoteLayout.ActionSize),
+        shape = RemoteLayout.ActionShape,
         color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Row(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, null, Modifier.size(22.dp), tint = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(8.dp))
+            Icon(icon, null, Modifier.size(RemoteLayout.InlineIconSize), tint = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(RemoteLayout.SmallGap))
             Text(label, fontSize = 13.sp, color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
         }
     }

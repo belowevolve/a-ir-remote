@@ -2,7 +2,7 @@ package dev.air.remote
 
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -29,14 +29,7 @@ fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Bo
                 },
             ) { change, dx -> change.consume(); distance += dx }
         }) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                FilterChip(selected = mode == 0, onClick = { mode = 0 }, label = { Text("ТВ") }, modifier = Modifier.weight(1f))
-                FilterChip(selected = mode == 1, onClick = { mode = 1 }, label = { Text("ПК") }, modifier = Modifier.weight(1f))
-                FilterChip(selected = mode == 2, onClick = { mode = 2 }, label = { Text("Микрофон") }, modifier = Modifier.weight(1.5f))
-            }
+            ModeTabs(mode, onSelected = { mode = it })
             Box(Modifier.weight(1f)) {
                 when (mode) {
                     1 -> PcScreen(pc)

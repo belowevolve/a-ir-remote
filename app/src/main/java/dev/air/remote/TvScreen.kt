@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -46,7 +46,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -68,7 +67,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
@@ -91,42 +89,35 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { paddingValues ->
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            val viewportHeight = maxHeight
             Column(
                 modifier = Modifier
-                    .widthIn(max = 560.dp)
+                    .widthIn(max = TvLayout.MaxWidth)
                     .fillMaxSize()
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .heightIn(min = viewportHeight)
+                    .padding(horizontal = RemoteLayout.ScreenPadding, vertical = RemoteLayout.Gap),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(model.tvName, style = MaterialTheme.typography.headlineSmall)
-                    }
-                    RemoteButton(
-                        icon = Icons.Rounded.Tune,
-                        label = "Настройки",
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        settings = true
-                    }
-                }
+                AppHeader(
+                    title = if (model.connected) model.tvName else "Не подключен",
+                    actionIcon = Icons.Rounded.Tune,
+                    onAction = { settings = true },
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RemoteButton(
                         icon = Icons.Rounded.PowerSettingsNew,
-                        label = "Питание · ИК",
-                        modifier = Modifier.size(68.dp),
+                        label = "Питание",
+                        onHold = if (!model.hasIr) model::holdPower else null,
+                        modifier = Modifier.size(RemoteLayout.ActionSize),
                         background = RemoteColors.PowerContainer,
                         tint = RemoteColors.Power,
                     ) {
@@ -137,8 +128,8 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         enabled = model.connected,
                         modifier = Modifier
                             .weight(1f)
-                            .height(68.dp),
-                        shape = RoundedCornerShape(22.dp),
+                            .height(RemoteLayout.ActionSize),
+                        shape = RemoteLayout.ActionShape,
                         color = MaterialTheme.colorScheme.surfaceContainer,
                     ) {
                         Row(
@@ -149,22 +140,22 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                                 painter = painterResource(R.drawable.ic_youtube),
                                 contentDescription = "YouTube",
                                 tint = Color.Unspecified,
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(TvLayout.AppIconSize),
                             )
-                            Spacer(Modifier.width(10.dp))
+                            Spacer(Modifier.width(RemoteLayout.SmallGap))
                                 Text("YouTube", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                     RemoteButton(
                         icon = Icons.AutoMirrored.Rounded.VolumeOff,
                         label = "Без звука",
-                        modifier = Modifier.size(68.dp),
+                        modifier = Modifier.size(RemoteLayout.ActionSize),
                     ) { model.key(164) }
                 }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
                 ) {
                     ColorButton(RemoteColors.Red, Modifier.weight(1f)) { model.key(183) }
                     ColorButton(RemoteColors.Green, Modifier.weight(1f)) { model.key(184) }
@@ -172,25 +163,28 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     ColorButton(RemoteColors.Blue, Modifier.weight(1f)) { model.key(186) }
                 }
 
+                Spacer(Modifier.weight(1f))
                 BoxWithConstraints(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val diameter = minOf(maxWidth, 252.dp)
+                    // Header, action rows, color keys, and gaps reserve space for the bottom controls.
+                    val fixedHeight = RemoteLayout.HeaderSize + RemoteLayout.ActionSize * 4 + TvLayout.ColorKeyHeight + RemoteLayout.Gap * 11
+                    val diameter = minOf(maxWidth, TvLayout.DpadMaxSize, (viewportHeight - fixedHeight).coerceAtLeast(TvLayout.DpadMinSize))
                     Box(
                         modifier = Modifier
                             .size(diameter)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surfaceContainer)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+                            .border(TvLayout.DpadBorder, MaterialTheme.colorScheme.outlineVariant, CircleShape),
                     ) {
                         RemoteButton(
                             icon = Icons.Rounded.KeyboardArrowUp,
                             label = "Вверх",
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
-                                .padding(top = 8.dp)
-                                .size(72.dp),
+                                .padding(top = TvLayout.DpadInset)
+                                .size(RemoteLayout.ActionSize),
                             background = Color.Transparent,
                         ) {
                             model.key(19)
@@ -200,8 +194,8 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                             label = "Вниз",
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .padding(bottom = 8.dp)
-                                .size(72.dp),
+                                .padding(bottom = TvLayout.DpadInset)
+                                .size(RemoteLayout.ActionSize),
                             background = Color.Transparent,
                         ) {
                             model.key(20)
@@ -211,8 +205,8 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                             label = "Влево",
                             modifier = Modifier
                                 .align(Alignment.CenterStart)
-                                .padding(start = 8.dp)
-                                .size(72.dp),
+                                .padding(start = TvLayout.DpadInset)
+                                .size(RemoteLayout.ActionSize),
                             background = Color.Transparent,
                         ) {
                             model.key(21)
@@ -222,15 +216,15 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                             label = "Вправо",
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
-                                .padding(end = 8.dp)
-                                .size(72.dp),
+                                .padding(end = TvLayout.DpadInset)
+                                .size(RemoteLayout.ActionSize),
                             background = Color.Transparent,
                         ) {
                             model.key(22)
                         }
                         Surface(
                             modifier = Modifier
-                                .size(84.dp)
+                                .size(TvLayout.ConfirmSize)
                                 .align(Alignment.Center)
                                 .semantics { onClick("OK") { model.key(23); true } }
                                 .pointerInput(model.connected) {
@@ -266,6 +260,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     }
                 }
 
+                Spacer(Modifier.weight(1f))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -283,7 +278,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
                 ) {
                     RemoteButton(Icons.Rounded.SkipPrevious, "Предыдущий", Modifier.weight(1f)) { model.key(88) }
                     RemoteButton(Icons.Rounded.FastRewind, "Перемотка назад", Modifier.weight(1f)) { model.key(89) }
@@ -292,7 +287,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     RemoteButton(Icons.Rounded.SkipNext, "Следующий", Modifier.weight(1f)) { model.key(87) }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
                     WideButton(
                         icon = Icons.Rounded.Keyboard,
                         label = "Клавиатура",
@@ -315,11 +310,11 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
 
     if (settings) {
         var address by remember { mutableStateOf(model.host) }
-        AlertDialog(
+        RemoteDialog(
             onDismissRequest = { settings = false },
             title = { Text("Телевизор") },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
                     Text(model.status, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     model.devices.forEach { (name, host) ->
                         TextButton(
@@ -340,6 +335,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         onValueChange = { address = it },
                         label = { Text("IP-адрес ТВ") },
                         singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                     )
                     TextButton(onClick = { model.key(178) }) { Text("Входы / HDMI") }
                     TextButton(onClick = { model.key(166) }) { Text("Следующий канал") }
@@ -373,7 +369,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
 
     if (model.pairing) {
         var pin by remember { mutableStateOf("") }
-        AlertDialog(
+        RemoteDialog(
             onDismissRequest = { model.cancelPairing() },
             title = { Text("Код на телевизоре") },
             text = {
@@ -386,6 +382,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     },
                     label = { Text("6 символов") },
                     singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             },
             confirmButton = {
@@ -400,4 +397,3 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
     }
 
 }
-

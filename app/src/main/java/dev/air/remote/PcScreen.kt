@@ -9,13 +9,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.KeyboardHide
+import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun PcScreen(model: PcRemoteModel) {
@@ -39,46 +44,64 @@ internal fun PcScreen(model: PcRemoteModel) {
         catch (_: android.content.ActivityNotFoundException) { launchError = "Открой настройки Bluetooth телефона вручную" }
         catch (_: SecurityException) { model.permissionDenied() }
     }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Компьютер", style = MaterialTheme.typography.headlineSmall)
-                Text(model.status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val keyHeight = KeyboardLayout.keyHeight(maxHeight)
+        val trackpadHeight = KeyboardLayout.trackpadHeight(maxHeight, keyHeight, keyboardVisible)
+        val toolbar: @Composable () -> Unit = {
+            Row(horizontalArrangement = Arrangement.Center) {
+                IconButton(onClick = { russian = !russian }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
+                    Icon(Icons.Rounded.Language, if (russian) "Русская раскладка" else "English")
+                }
+                IconButton(onClick = { settingsVisible = true }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
+                    Icon(Icons.Rounded.Tune, "Настройки")
+                }
+                IconButton(onClick = { keyboardVisible = !keyboardVisible }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
+                    Icon(if (keyboardVisible) Icons.Rounded.KeyboardHide else Icons.Rounded.Keyboard,
+                        if (keyboardVisible) "Скрыть клавиатуру" else "Показать клавиатуру")
+                }
             }
-            TextButton(onClick = {
-                if (Build.VERSION.SDK_INT >= 31 && !model.hasPermission()) permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
-                else { model.start(); devicesVisible = true }
-            }) { Text(if (model.connected) "Устройства" else "Подключить") }
         }
-        Trackpad(model, keyboardVisible)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = { keyboardVisible = !keyboardVisible }) { Text("Клавиатура") }
-            TextButton(onClick = { settingsVisible = true }) { Text("Настройки") }
-            TextButton(onClick = { russian = !russian }) { Text(if (russian) "RU" else "EN") }
-        }
-        if (keyboardVisible) {
-            PcKeyboard(model, russian)
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = RemoteLayout.SmallGap),
+            verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
+        ) {
+            Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
+                AppHeader(if (model.connected) model.deviceName else "Не подключен", onAction = {
+                    if (Build.VERSION.SDK_INT >= 31 && !model.hasPermission()) permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
+                    else { model.start(); devicesVisible = true }
+                }, actionIcon = Icons.Rounded.Devices,
+                    actionDescription = if (model.connected) "Устройства" else "Подключить")
+            }
+            Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
+                Trackpad(model, Modifier.height(trackpadHeight))
+            }
+            if (keyboardVisible) {
+                PcKeyboard(model, russian, keyHeight, toolbar)
+            } else {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { toolbar() }
+            }
         }
     }
-    if (devicesVisible) AlertDialog(
+    if (devicesVisible) RemoteDialog(
         onDismissRequest = { devicesVisible = false },
         title = { Text("Устройства") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
                 Text(model.status)
-                TextButton(onClick = { launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }) { Text("Включить Bluetooth") }
-                TextButton(enabled = model.registered, onClick = {
-                    if (Build.VERSION.SDK_INT >= 31 && view.context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-                        permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
-                    else launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120))
-                }) { Text("Видимость · 2 минуты") }
+                if (!model.registered) TextButton(onClick = { launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }) { Text("Включить Bluetooth") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(enabled = model.registered, onClick = {
+                        if (Build.VERSION.SDK_INT >= 31 && view.context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                            permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
+                        else launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120))
+                    }) { Text("Видимость · 2 минуты") }
+                    TextButton(onClick = { model.start(); model.refreshDevices() }) { Text("Обновить") }
+                }
                 if (launchError.isNotEmpty()) Text(launchError)
-                TextButton(onClick = { model.start(); model.refreshDevices() }) { Text("Обновить") }
-                model.devices.forEach { device ->
-                    TextButton(enabled = model.registered && !model.connected, onClick = { model.connect(device) }) { Text(model.deviceLabel(device)) }
+                Column {
+                    model.devices.forEach { device ->
+                        TextButton(enabled = model.registered && !model.connected, onClick = { model.connect(device); devicesVisible = false }) { Text(model.deviceLabel(device)) }
+                    }
                 }
                 if (model.connected) TextButton(onClick = model::disconnect) { Text("Отключить компьютер") }
             }
@@ -86,11 +109,12 @@ internal fun PcScreen(model: PcRemoteModel) {
         confirmButton = { TextButton(onClick = { devicesVisible = false }) { Text("Готово") } },
     )
     if (settingsVisible) {
-        AlertDialog(
+        RemoteDialog(
             onDismissRequest = { settingsVisible = false },
-            title = { Text("Тачпад") },
+            title = { Text("Настройки") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
+                    Text("Тачпад", style = MaterialTheme.typography.titleSmall)
                     Text("Чувствительность: ${"%.1f".format(model.sensitivity)}×")
                     Slider(
                         value = model.sensitivity,
