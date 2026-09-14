@@ -11,6 +11,7 @@ import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,20 +29,12 @@ internal fun AppHeader(
     onAction: (() -> Unit)? = null,
 ) {
     Row(Modifier.fillMaxWidth().heightIn(min = RemoteLayout.HeaderSize), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (actionIcon != null && onAction != null) {
-            Surface(
-                onClick = onAction,
-                modifier = Modifier.size(RemoteLayout.HeaderSize),
-                shape = RemoteLayout.HeaderShape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(actionIcon, actionDescription, Modifier.size(RemoteLayout.HeaderIconSize),
-                        tint = MaterialTheme.colorScheme.onSurface)
-                }
+            IconButton(onClick = onAction, modifier = Modifier.size(RemoteLayout.HeaderActionSize)) {
+                Icon(actionIcon, actionDescription, Modifier.size(RemoteLayout.HeaderIconSize),
+                    tint = MaterialTheme.colorScheme.onSurface)
             }
         }
     }

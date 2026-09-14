@@ -109,3 +109,11 @@ PCM Float32 (PCM16 при отсутствии поддержки), без сж�
 
 Для сборки нужны JDK 17 или новее и Android SDK 37. Путь к SDK задаётся через
 `ANDROID_HOME` либо `sdk.dir` в локальном `local.properties`.
+
+## Production APK
+
+```sh
+./gradlew assembleRelease
+```
+
+APK будет в `app/build/outputs/apk/release/app-release.apk`.

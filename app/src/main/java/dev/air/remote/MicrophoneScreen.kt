@@ -8,17 +8,19 @@ import androidx.core.content.edit
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MicOff
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
@@ -56,19 +58,20 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewportHeight = maxHeight
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).heightIn(min = viewportHeight).padding(RemoteLayout.ScreenPadding), verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
-            AppHeader("Микрофон", actionIcon = Icons.Rounded.Settings, onAction = {
+        Column(Modifier.fillMaxSize().heightIn(min = viewportHeight)
+            .padding(horizontal = RemoteLayout.ScreenPadding).padding(bottom = RemoteLayout.SmallGap),
+            verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
+            AppHeader(
+                title = when {
+                    state.streaming -> host
+                    state.active -> "Подключение…"
+                    else -> "Не подключен"
+                },
+                actionIcon = Icons.AutoMirrored.Outlined.HelpOutline,
+                actionDescription = "Как подключить микрофон",
+                onAction = {
                 uri.openUri("https://github.com/belowevolve/a-ir-remote/blob/master/README.md#настройка")
             })
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(RemoteLayout.ScreenPadding), verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
-                    Text(if (state.muted) "Микрофон выключен" else state.message, style = MaterialTheme.typography.titleMedium)
-                    LinearProgressIndicator(progress = { state.peak }, modifier = Modifier.fillMaxWidth())
-                    if (state.streaming && !state.muted && state.peak >= 0.98f)
-                        Text("Перегрузка", color = MaterialTheme.colorScheme.error)
-                    if (state.dropped > 0) Text("Пропущено пакетов: ${state.dropped}")
-                }
-            }
             OutlinedTextField(host, { host = it }, label = { Text("IP-адрес ПК") }, placeholder = { Text("192.168.1.20") },
                 enabled = !state.active, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
             OutlinedTextField(port, { port = it }, label = { Text("Порт") }, enabled = !state.active,
@@ -78,25 +81,56 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
                 FilterChip(selected = natural, onClick = { natural = true; preferences.edit { putBoolean("speech", false) } }, enabled = !state.active, label = { Text("Естественный звук") })
             }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+            if (!state.active && state.message !in listOf("Готов к подключению", "Трансляция остановлена"))
+                Text(state.message, color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
-                Button(modifier = Modifier.weight(1f).height(RemoteLayout.ActionSize), shape = RemoteLayout.ActionShape, onClick = {
-                    if (state.active) MicrophoneService.stop(context)
-                    else permissions.launch(buildList {
+                if (state.streaming) MicrophoneButton(
+                    muted = state.muted, peak = state.peak, modifier = Modifier.weight(1f),
+                    onClick = { MicrophoneService.mute(context) },
+                ) else Button(modifier = Modifier.weight(1f).height(RemoteLayout.ActionSize),
+                    shape = RemoteLayout.ActionShape, enabled = !state.active, onClick = {
+                    permissions.launch(buildList {
                         add(Manifest.permission.RECORD_AUDIO)
                         if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
                         if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
                     }.toTypedArray())
-                }) { Text(if (state.active) "Остановить" else "Подключить") }
-                if (state.streaming) RemoteButton(
-                    icon = if (state.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
-                    label = if (state.muted) "Включить микрофон" else "Выключить микрофон",
+                }) { Text(if (state.active) "Подключение…" else "Подключить") }
+                if (state.active) RemoteButton(
+                    icon = Icons.Rounded.Stop,
+                    label = "Остановить передачу",
                     modifier = Modifier.size(RemoteLayout.ActionSize),
-                    background = if (state.muted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                ) { MicrophoneService.mute(context) }
+                ) { MicrophoneService.stop(context) }
             }
 
         }
     }
 
+}
+
+@Composable
+private fun MicrophoneButton(muted: Boolean, peak: Float, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(RemoteLayout.ActionSize).semantics {
+            stateDescription = if (muted) "Микрофон выключен" else "Микрофон включён"
+        },
+        shape = RemoteLayout.ActionShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Column(Modifier.padding(horizontal = RemoteLayout.ScreenPadding),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(if (muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
+                if (muted) "Включить микрофон" else "Выключить микрофон",
+                Modifier.size(RemoteLayout.ActionIconSize))
+            Spacer(Modifier.height(RemoteLayout.SmallGap))
+            LinearProgressIndicator(
+                progress = { if (muted) 0f else peak.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(RemoteLayout.MeterHeight),
+                color = if (!muted && peak >= 0.98f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                drawStopIndicator = {},
+            )
+        }
+    }
 }

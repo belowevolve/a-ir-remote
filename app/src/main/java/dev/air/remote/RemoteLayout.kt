@@ -9,7 +9,9 @@ internal object RemoteLayout {
     val ScreenPadding = 16.dp
     val SmallGap = 8.dp
     val Gap = 12.dp
-    val HeaderSize = 52.dp
+    val HeaderSize = 48.dp
+    val HeaderActionSize = 48.dp
+    val MeterHeight = 4.dp
     val HeaderIconSize = 26.dp
     val HeaderShape = RoundedCornerShape(18.dp)
     val TabHeight = 48.dp

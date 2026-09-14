@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.FastForward
@@ -96,9 +94,9 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     .widthIn(max = TvLayout.MaxWidth)
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .verticalScroll(rememberScrollState())
                     .heightIn(min = viewportHeight)
-                    .padding(horizontal = RemoteLayout.ScreenPadding, vertical = RemoteLayout.Gap),
+                    .padding(horizontal = RemoteLayout.ScreenPadding)
+                    .padding(bottom = RemoteLayout.SmallGap),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
             ) {

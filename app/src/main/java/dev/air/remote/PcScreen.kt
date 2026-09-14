@@ -7,8 +7,6 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.KeyboardHide
@@ -46,7 +44,6 @@ internal fun PcScreen(model: PcRemoteModel) {
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val keyHeight = KeyboardLayout.keyHeight(maxHeight)
-        val trackpadHeight = KeyboardLayout.trackpadHeight(maxHeight, keyHeight, keyboardVisible)
         val toolbar: @Composable () -> Unit = {
             Row(horizontalArrangement = Arrangement.Center) {
                 IconButton(onClick = { russian = !russian }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
@@ -62,18 +59,19 @@ internal fun PcScreen(model: PcRemoteModel) {
             }
         }
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = RemoteLayout.SmallGap),
-            verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
+            Modifier.fillMaxSize().padding(bottom = RemoteLayout.SmallGap),
+            verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
         ) {
             Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
-                AppHeader(if (model.connected) model.deviceName else "Не подключен", onAction = {
+                AppHeader(if (model.connected) model.deviceName else "Не подключен",
+                    onAction = {
                     if (Build.VERSION.SDK_INT >= 31 && !model.hasPermission()) permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
                     else { model.start(); devicesVisible = true }
                 }, actionIcon = Icons.Rounded.Devices,
                     actionDescription = if (model.connected) "Устройства" else "Подключить")
             }
-            Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
-                Trackpad(model, Modifier.height(trackpadHeight))
+            Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding).weight(1f)) {
+                Trackpad(model, Modifier.fillMaxSize())
             }
             if (keyboardVisible) {
                 PcKeyboard(model, russian, keyHeight, toolbar)

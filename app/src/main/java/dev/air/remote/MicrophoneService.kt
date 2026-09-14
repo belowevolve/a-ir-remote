@@ -151,14 +151,12 @@ class MicrophoneService : Service() {
         recorder = record
         try {
             ensureActive()
+            // Initialize protobuf/PCM serialization before the hardware starts accumulating audio.
+            MicTransport.frame(FloatArray(MicTransport.SAMPLES), MicTransport.SAMPLES, false, floatPcm)
+            val output = connection.getOutputStream()
             audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
                 it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
             }?.let { record.setPreferredDevice(it) }
-            record.startRecording()
-            check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Микрофон недоступен" }
-            mutableStatus.update { it.copy(streaming = true, message = "Передача на $host:$port",
-                format = "48 кГц · моно · ${if (floatPcm) "Float32" else "PCM16"} · ${if (unprocessed) "без обработки" else if (natural) "распознавание речи" else "связь"}") }
-            notifyStatus()
             val frames = Channel<FloatArray>(capacity = 6)
             val progress = AtomicLong(SystemClock.elapsedRealtime())
             // Socket SO_TIMEOUT only limits reads. Close a blocked writer explicitly.
@@ -178,6 +176,12 @@ class MicrophoneService : Service() {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
                 val shorts = ShortArray(MicTransport.SAMPLES)
                 var ticks = 0
+                record.startRecording()
+                check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Микрофон недоступен" }
+                mutableStatus.update { it.copy(streaming = true, message = "Передача на $host:$port",
+                    format = "48 кГц · моно · ${if (floatPcm) "Float32" else "PCM16"} · ${if (unprocessed) "без обработки" else if (natural) "распознавание речи" else "связь"}") }
+                // Notification IPC must not delay the first read or the TCP writer.
+                launch(Dispatchers.Main) { notifyStatus() }
                 while (isActive) {
                     val samples = FloatArray(MicTransport.SAMPLES)
                     var offset = 0
@@ -204,7 +208,7 @@ class MicrophoneService : Service() {
             try {
                 for (samples in frames) {
                     ensureActive()
-                    MicTransport.write(connection.getOutputStream(), MicTransport.frame(samples, samples.size, mutableStatus.value.muted, floatPcm))
+                    MicTransport.write(output, MicTransport.frame(samples, samples.size, mutableStatus.value.muted, floatPcm))
                     progress.set(SystemClock.elapsedRealtime())
                 }
             } finally {
