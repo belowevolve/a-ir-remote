@@ -113,7 +113,10 @@ PCM Float32 (PCM16 при отсутствии поддержки), без сж�
 ## Production APK
 
 ```sh
-./gradlew assembleRelease
+bash scripts/build-release.sh
 ```
 
-APK будет в `app/build/outputs/apk/release/app-release.apk`.
+Подписанный APK: `app/build/outputs/apk/release/app-release.apk`.
+Первый запуск создаёт ключ в `.signing/` (вне Git): сохрани резервную копию папки для будущих обновлений.
+Дальше работает и `./gradlew assembleRelease`. Повышай `versionCode` перед выпуском обновления.
+Release не обновит установленную debug-версию с другой подписью: переход требует удаления debug-приложения с потерей его настроек.

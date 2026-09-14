@@ -1,14 +1,19 @@
 package dev.air.remote
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 private val keyboardRows = listOf(
     listOf("Esc" to 41) + (1..12).map { "F$it" to (57 + it) } + listOf("Del" to 76),
@@ -28,8 +33,13 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
                 Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
                     row.forEach { (label, code) ->
                         val index = if (label.length == 1) latin.indexOf(label) else -1
-                        PcKey(if (russian && index >= 0) cyrillic[index].toString() else label,
-                            Modifier.weight(if (label.length > 1 && label !in listOf("Esc", "Del") && !label.startsWith("F")) 1.3f else 1f), model.connected, code == -2 && model.modifiers and 2 != 0) {
+                        PcKey(
+                            label = if (russian && (index >= 0)) cyrillic[index].toString() else label,
+                            modifier = Modifier.weight(if (label.length > 1 && label !in listOf("Esc", "Del") && !label.startsWith("F")) 1.3f else 1f),
+                            enabled = model.connected,
+                            selected = (code == -2) && ((model.modifiers and 2) != 0),
+                            repeatOnHold = code == 42 || code == 76,
+                        ) {
                             if (code == -2) model.toggleModifier(2) else model.key(code)
                         }
                     }
@@ -37,7 +47,12 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
             }
             Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
                 listOf("Ctrl" to 1, "Win" to 8, "Alt" to 4).forEach { (label, mask) ->
-                    PcKey(label, Modifier.weight(1f), model.connected, model.modifiers and mask != 0) { model.toggleModifier(mask) }
+                    PcKey(
+                        label = label,
+                        modifier = Modifier.weight(1f),
+                        enabled = model.connected,
+                        selected = (model.modifiers and mask) != 0,
+                    ) { model.toggleModifier(mask) }
                 }
                 PcKey("Space", Modifier.weight(2.5f), model.connected) { model.key(44) }
                 listOf("Home" to 74, "End" to 77).forEach { (label, code) ->
@@ -48,10 +63,10 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
                 PcKey("Win", Modifier.weight(1f), model.connected) { model.windowsKey() }
                 Box(Modifier.weight(2f), contentAlignment = Alignment.Center) { toolbar() }
                 Column(Modifier.weight(1.65f), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
-                    PcKey("↑", Modifier.align(Alignment.CenterHorizontally).width(KeyboardLayout.ArrowWidth), model.connected) { model.key(82) }
+                    PcKey("↑", Modifier.align(Alignment.CenterHorizontally).width(KeyboardLayout.ArrowWidth), model.connected, repeatOnHold = true) { model.key(82) }
                     Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
                         listOf("←" to 80, "↓" to 81, "→" to 79).forEach { (label, code) ->
-                            PcKey(label, Modifier.weight(1f), model.connected) { model.key(code) }
+                            PcKey(label, Modifier.weight(1f), model.connected, repeatOnHold = true) { model.key(code) }
                         }
                     }
                 }
@@ -63,9 +78,44 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
 private val LocalKeyHeight = compositionLocalOf { KeyboardLayout.KeyHeight }
 
 @Composable
-private fun PcKey(label: String, modifier: Modifier, enabled: Boolean, selected: Boolean = false, click: () -> Unit) {
-    Surface(onClick = click, enabled = enabled, modifier = modifier.height(LocalKeyHeight.current), shape = KeyboardLayout.KeyShape,
+private fun PcKey(
+    label: String,
+    modifier: Modifier,
+    enabled: Boolean,
+    selected: Boolean = false,
+    repeatOnHold: Boolean = false,
+    click: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val currentClick by rememberUpdatedState(click)
+    var repeating by remember { mutableStateOf(false) }
+    LaunchedEffect(pressed, enabled, repeating) {
+        if (!pressed || !enabled) {
+            repeating = false
+        } else if (repeating) {
+            while (true) {
+                currentClick()
+                delay(60)
+            }
+        }
+    }
+    Surface(
+        modifier = modifier.height(LocalKeyHeight.current).clip(KeyboardLayout.KeyShape)
+            .combinedClickable(
+                enabled = enabled,
+                role = Role.Button,
+                interactionSource = interaction,
+                indication = ripple(),
+                onClick = { currentClick() },
+                onLongClick = if (repeatOnHold) ({ repeating = true }) else null,
+            ),
+        shape = KeyboardLayout.KeyShape,
         color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f),
-    ) { Box(contentAlignment = Alignment.Center) { Text(label, fontSize = if (label.length >= 3) 11.sp else 14.sp, maxLines = 1) } }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, fontSize = if (label.length >= 3) 11.sp else 14.sp, maxLines = 1)
+        }
+    }
 }

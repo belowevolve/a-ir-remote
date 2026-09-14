@@ -43,10 +43,10 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
     fun start() {
         val number = port.toIntOrNull()
         val address = host.trim()
-        if (!address.matches(Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) || address.split('.').any { it.toInt() !in 0..255 }) {
+        if (!address.matches(Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) || address.split('.').any { (it.toInt() !in 0..255) }) {
             error = "Укажи IPv4-адрес компьютера"; return
         }
-        if (number == null || number !in 1..65535) { error = "Порт должен быть от 1 до 65535"; return }
+        if (number == null || (number !in 1..65535)) { error = "Порт должен быть от 1 до 65535"; return }
         try {
             beforeStart()
             MicrophoneService.start(context, address, number, natural)
@@ -55,57 +55,98 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
         } catch (e: Exception) { error = e.message ?: "Не удалось запустить трансляцию" }
     }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             error = "Для трансляции разреши доступ к микрофону в настройках приложения"
-        else if (Build.VERSION.SDK_INT >= 37 && context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED)
+        } else if (Build.VERSION.SDK_INT >= 37 && context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
             error = "Разреши доступ к устройствам поблизости для подключения к ПК"
-        else start()
+        } else {
+            start()
+        }
     }
-        Column(Modifier.fillMaxSize().padding(horizontal = RemoteLayout.ScreenPadding),
-            verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-            AppHeader(
-                title = when {
-                    state.streaming -> host
-                    state.active -> "Подключение…"
-                    else -> "Не подключен"
-                },
-                actionIcon = Icons.AutoMirrored.Outlined.HelpOutline,
-                actionDescription = "Как подключить микрофон",
-                onAction = {
-                uri.openUri("https://github.com/belowevolve/a-ir-remote/blob/master/README.md#настройка")
-            })
-            OutlinedTextField(host, { host = it }, label = { Text("IP-адрес ПК") }, placeholder = { Text("192.168.1.20") },
-                enabled = !state.active, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(port, { port = it }, label = { Text("Порт") }, enabled = !state.active,
-                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-                FilterChip(selected = !natural, onClick = { natural = false; preferences.edit { putBoolean("speech", true) } }, enabled = !state.active, label = { Text("Речь") })
-                FilterChip(selected = natural, onClick = { natural = true; preferences.edit { putBoolean("speech", false) } }, enabled = !state.active, label = { Text("Естественный звук") })
-            }
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-            if (!state.active && state.message !in listOf("Готов к подключению", "Трансляция остановлена"))
-                Text(state.message, color = MaterialTheme.colorScheme.error)
-            Spacer(Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
-                if (state.streaming) MicrophoneButton(
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = RemoteLayout.ScreenPadding),
+        verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
+    ) {
+        AppHeader(
+            title = when {
+                state.streaming -> host
+                state.active -> "Подключение…"
+                else -> "Не подключен"
+            },
+            actionIcon = Icons.AutoMirrored.Outlined.HelpOutline,
+            actionDescription = "Как подключить микрофон",
+        ) {
+            uri.openUri("https://github.com/belowevolve/a-ir-remote/blob/master/README.md#настройка")
+        }
+        OutlinedTextField(
+            value = host,
+            onValueChange = { host = it },
+            label = { Text("IP-адрес ПК") },
+            placeholder = { Text("192.168.1.20") },
+            enabled = !state.active,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = port,
+            onValueChange = { port = it },
+            label = { Text("Порт") },
+            enabled = !state.active,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
+            FilterChip(
+                selected = !natural,
+                onClick = { natural = false; preferences.edit { putBoolean("speech", true) } },
+                enabled = !state.active,
+                label = { Text("Речь") },
+            )
+            FilterChip(
+                selected = natural,
+                onClick = { natural = true; preferences.edit { putBoolean("speech", false) } },
+                enabled = !state.active,
+                label = { Text("Естественный звук") },
+            )
+        }
+        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        if (!state.active && state.message !in listOf("Готов к подключению", "Трансляция остановлена")) {
+            Text(state.message, color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
+            if (state.streaming) {
+                MicrophoneButton(
                     muted = state.muted, peak = state.peak, modifier = Modifier.weight(1f),
                     onClick = { MicrophoneService.mute(context) },
-                ) else Button(modifier = Modifier.weight(1f).height(RemoteLayout.ActionSize),
-                    shape = RemoteLayout.ActionShape, enabled = !state.active, onClick = {
-                    permissions.launch(buildList {
-                        add(Manifest.permission.RECORD_AUDIO)
-                        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-                        if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
-                    }.toTypedArray())
-                }) { Text(if (state.active) "Подключение…" else "Подключить") }
-                if (state.active) RemoteButton(
+                )
+            } else {
+                Button(
+                    modifier = Modifier.weight(1f).height(RemoteLayout.ActionSize),
+                    shape = RemoteLayout.ActionShape,
+                    enabled = !state.active,
+                    onClick = {
+                        permissions.launch(buildList {
+                            add(Manifest.permission.RECORD_AUDIO)
+                            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                            if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                        }.toTypedArray())
+                    },
+                ) { Text(if (state.active) "Подключение…" else "Подключить") }
+            }
+            if (state.active) {
+                RemoteButton(
                     icon = Icons.Rounded.Stop,
                     label = "Остановить передачу",
                     modifier = Modifier.size(RemoteLayout.ActionSize),
                 ) { MicrophoneService.stop(context) }
             }
-
         }
+    }
 }
 
 @Composable

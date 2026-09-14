@@ -3,6 +3,7 @@ package dev.air.remote
 import android.annotation.SuppressLint
 import android.Manifest
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,18 +40,18 @@ class MainActivity : ComponentActivity() {
     }
 
     @SuppressLint("RestrictedApi")
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
-        if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if ((event.action == KeyEvent.ACTION_DOWN) && (event.repeatCount == 0)) {
             when (event.keyCode) {
-                android.view.KeyEvent.KEYCODE_VOLUME_UP -> {
+                KeyEvent.KEYCODE_VOLUME_UP -> {
                     if (pcMode) pcModel.volume(1) else model.key(24)
                     return true
                 }
-                android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
                     if (pcMode) pcModel.volume(2) else model.key(25)
                     return true
                 }
-                android.view.KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                KeyEvent.KEYCODE_VOLUME_MUTE -> {
                     if (pcMode) pcModel.volume(3) else model.key(164)
                     return true
                 }

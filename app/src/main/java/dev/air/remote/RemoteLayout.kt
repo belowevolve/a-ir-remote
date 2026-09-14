@@ -36,14 +36,14 @@ internal object KeyboardLayout {
     val ToolbarSize = 40.dp
     val MinTrackpadHeight = 96.dp
     val TrackpadShape = RoundedCornerShape(16.dp)
-    const val RowCount = 8
+    const val ROW_COUNT = 8
 
     // Outer screen padding is already excluded from the available height.
-    private val chromeHeight = RemoteLayout.HeaderSize + RemoteLayout.SmallGap * 2
-    private val rowGapsHeight = RowGap * (RowCount - 1)
+    private val chromeHeight = RemoteLayout.HeaderSize + (RemoteLayout.SmallGap * 2)
+    private val rowGapsHeight = RowGap * (ROW_COUNT - 1)
 
     fun keyHeight(available: Dp): Dp =
-        ((available - chromeHeight - MinTrackpadHeight - rowGapsHeight) / RowCount)
+        ((available - chromeHeight - MinTrackpadHeight - rowGapsHeight) / ROW_COUNT)
             .coerceIn(MinKeyHeight, KeyHeight)
 
 }

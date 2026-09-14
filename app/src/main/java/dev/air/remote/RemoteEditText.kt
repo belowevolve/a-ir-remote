@@ -119,7 +119,7 @@ class RemoteEditText(context: Context) : EditText(context) {
         if (hasWindowFocus && !requestedKeyboard) {
             requestedKeyboard = true
             requestFocus()
-            post { context.getSystemService(InputMethodManager::class.java).showSoftInput(this, InputMethodManager.SHOW_IMPLICIT) }
+            post { context.getSystemService(InputMethodManager::class.java).showSoftInput(this, 0) }
         }
     }
 

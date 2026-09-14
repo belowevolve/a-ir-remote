@@ -93,9 +93,13 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
     }
 
     private fun schedule(delay: Long, epoch: Int, action: () -> Unit) {
-        worker.schedule({
-            val current = synchronized(this) { epoch == generation }
-            if (current) action()
-        }, delay, TimeUnit.NANOSECONDS)
+        worker.schedule(
+            {
+                val current = synchronized(this) { epoch == generation }
+                if (current) action()
+            },
+            delay,
+            TimeUnit.NANOSECONDS,
+        )
     }
 }

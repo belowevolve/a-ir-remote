@@ -25,7 +25,7 @@ internal object MicTransport {
     }
 
     fun frame(samples: FloatArray, count: Int, muted: Boolean, pcmFloat: Boolean): ByteArray {
-        require(count in 1..samples.size)
+        require(count in (1..samples.size))
         val pcm = ByteBuffer.allocate(count * if (pcmFloat) 4 else 2).order(ByteOrder.LITTLE_ENDIAN)
         for (i in 0 until count) {
             val value = if (muted) 0f else samples[i].coerceIn(-1f, 1f)

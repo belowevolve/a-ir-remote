@@ -29,8 +29,21 @@ android {
         jniLibs.keepDebugSymbols += "**/libandroidx.graphics.path.so"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file(".signing/release.p12")
+            val passwordFile = rootProject.layout.projectDirectory.file(".signing/password")
+            val password = providers.fileContents(passwordFile).asText.orNull?.trim()
+            storePassword = password
+            keyPassword = password
+            keyAlias = "air-remote"
+            storeType = "PKCS12"
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -60,4 +73,10 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.protobuf.javalite)
     testImplementation(libs.junit)
+}
+
+tasks.withType<Test>().configureEach {
+    // Protobuf Lite uses Unsafe for Android message layouts. Permit it explicitly
+    // on the desktop test JVM; Android builds and other JVM warnings are unaffected.
+    jvmArgs("--sun-misc-unsafe-memory-access=allow")
 }

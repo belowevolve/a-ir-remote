@@ -29,8 +29,12 @@ internal object PcHidReports {
         byteArrayOf(modifiers.toByte(), 0, key.toByte(), 0, 0, 0, 0, 0)
 
     fun mouse(buttons: Int = 0, x: Int = 0, y: Int = 0, wheel: Int = 0) =
-        byteArrayOf((buttons and 7).toByte(), x.coerceIn(-127,127).toByte(),
-            y.coerceIn(-127,127).toByte(), wheel.coerceIn(-127,127).toByte())
+        byteArrayOf(
+            (buttons and 7).toByte(),
+            x.coerceIn(-127, 127).toByte(),
+            y.coerceIn(-127, 127).toByte(),
+            wheel.coerceIn(-127, 127).toByte(),
+        )
 
     fun consumer(volumeUp: Boolean = false, volumeDown: Boolean = false, mute: Boolean = false) =
         byteArrayOf(((if (volumeUp) 1 else 0) or (if (volumeDown) 2 else 0) or (if (mute) 4 else 0)).toByte())

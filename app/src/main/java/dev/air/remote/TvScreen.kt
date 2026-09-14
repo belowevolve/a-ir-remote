@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.onClick
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Stop
@@ -99,8 +100,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 AppHeader(
                     title = if (model.connected) model.tvName else "Не подключен",
                     actionIcon = Icons.Rounded.Tune,
-                    onAction = { settings = true },
-                )
+                ) { settings = true }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -219,23 +219,25 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                                 .align(Alignment.Center)
                                 .semantics { onClick("OK") { model.key(23); true } }
                                 .pointerInput(model.connected) {
-                                    detectTapGestures(onPress = {
-                                        coroutineScope {
-                                            var held = false
-                                            val timer = launch {
-                                                delay(viewConfiguration.longPressTimeoutMillis)
-                                                held = true
-                                                model.holdOk(true)
+                                    detectTapGestures(
+                                        onPress = {
+                                            coroutineScope {
+                                                var held = false
+                                                val timer = launch {
+                                                    delay(viewConfiguration.longPressTimeoutMillis.milliseconds)
+                                                    held = true
+                                                    model.holdOk(pressed = true)
+                                                }
+                                                try {
+                                                    val released = tryAwaitRelease()
+                                                    if (released && !held) model.key(23)
+                                                } finally {
+                                                    timer.cancel()
+                                                    if (held) model.holdOk(pressed = false)
+                                                }
                                             }
-                                            try {
-                                                val released = tryAwaitRelease()
-                                                if (released && !held) model.key(23)
-                                            } finally {
-                                                timer.cancel()
-                                                if (held) model.holdOk(false)
-                                            }
-                                        }
-                                    })
+                                        },
+                                    )
                                 },
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary,

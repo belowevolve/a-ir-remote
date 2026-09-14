@@ -27,7 +27,7 @@ fun KeyboardScreen(model: RemoteModel) {
         val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
         val hintColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
         val inputType = model.keyboardInputType.takeIf { it != 0 } ?: android.text.InputType.TYPE_CLASS_TEXT
-        val imeOptions = model.keyboardImeOptions.takeIf { it and 0xff != 0 } ?: EditorInfo.IME_ACTION_DONE
+        val imeOptions = model.keyboardImeOptions.takeIf { (it and 0xff) != 0 } ?: EditorInfo.IME_ACTION_DONE
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(24.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -48,7 +48,7 @@ fun KeyboardScreen(model: RemoteModel) {
                             hint = "Введите текст"
                             setTextColor(textColor)
                             setHintTextColor(hintColor)
-                            setSingleLine(true)
+                            isSingleLine = true
                             this.inputType = inputType
                             this.imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
                             onValueChanged = model::editKeyboard
@@ -60,16 +60,15 @@ fun KeyboardScreen(model: RemoteModel) {
                             applyValue(model.keyboardValue)
                             post {
                                 requestFocus()
-                                context.getSystemService(InputMethodManager::class.java).showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                                context.getSystemService(InputMethodManager::class.java).showSoftInput(this, 0)
                             }
                         }
-                    },
-                    update = { editor ->
-                        if (editor.inputType != inputType) editor.inputType = inputType
-                        editor.imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-                        editor.applyValue(model.keyboardValue)
-                    },
-                )
+                    }
+                ) { editor ->
+                    if (editor.inputType != inputType) editor.inputType = inputType
+                    editor.imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                    editor.applyValue(model.keyboardValue)
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     IconButton(onClick = model::deleteKeyboardCharacter) {
                         Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = "Удалить символ на ТВ")

@@ -20,6 +20,8 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 
 internal data class MicStatus(
     val active: Boolean = false,
@@ -42,8 +44,12 @@ class MicrophoneService : Service() {
         private const val NOTIFICATION = 48
 
         fun start(context: Context, host: String, port: Int, natural: Boolean) {
-            context.startForegroundService(Intent(context, MicrophoneService::class.java)
-                .putExtra("host", host).putExtra("port", port).putExtra("natural", natural))
+            context.startForegroundService(
+                Intent(context, MicrophoneService::class.java)
+                    .putExtra("host", host)
+                    .putExtra("port", port)
+                    .putExtra("natural", natural),
+            )
         }
         fun stop(context: Context) { context.stopService(Intent(context, MicrophoneService::class.java)) }
         fun mute(context: Context) {
@@ -84,11 +90,11 @@ class MicrophoneService : Service() {
             wakeLock = getSystemService(PowerManager::class.java).newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, "AirRemote:Microphone").apply {
                     setReferenceCounted(false)
-                    acquire(10 * 60 * 1000L)
+                    acquire(10.minutes.inWholeMilliseconds)
                 }
             scope.launch {
                 while (isActive) {
-                    delay(5 * 60 * 1000L)
+                    delay(5.minutes)
                     withContext(Dispatchers.Main) { if (!destroyed) wakeLock?.acquire(10 * 60 * 1000L) }
                 }
             }
@@ -119,9 +125,9 @@ class MicrophoneService : Service() {
     }
 
     private suspend fun stream(host: String, port: Int, natural: Boolean) = coroutineScope {
-        require(port in 1..65535) { "Порт должен быть от 1 до 65535" }
+        require(port in (1..65535)) { "Порт должен быть от 1 до 65535" }
         // Numeric LAN addresses only: no DNS stalls or accidental Internet streaming.
-        require(host.matches(Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) && host.split('.').all { it.toInt() in 0..255 }) {
+        require(host.matches(Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) && host.split('.').all { (it.toInt() in 0..255) }) {
             "Укажи IPv4-адрес ПК, например 192.168.1.20"
         }
         val address = InetAddress.getByName(host)
@@ -152,7 +158,7 @@ class MicrophoneService : Service() {
         try {
             ensureActive()
             // Initialize protobuf/PCM serialization before the hardware starts accumulating audio.
-            MicTransport.frame(FloatArray(MicTransport.SAMPLES), MicTransport.SAMPLES, false, floatPcm)
+            MicTransport.frame(FloatArray(MicTransport.SAMPLES), MicTransport.SAMPLES, muted = false, pcmFloat = floatPcm)
             val output = connection.getOutputStream()
             audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
                 it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
@@ -162,7 +168,7 @@ class MicrophoneService : Service() {
             // Socket SO_TIMEOUT only limits reads. Close a blocked writer explicitly.
             val watchdog = scope.launch {
                 while (isActive) {
-                    delay(100)
+                    delay(100.milliseconds)
                     if (SystemClock.elapsedRealtime() - progress.get() >= 1500) {
                         streamFailure = "Сеть или микрофон не отвечает. Подключись заново"
                         runCatching { connection.close() }

@@ -27,7 +27,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     private var closed = false
     private var host: BluetoothDevice? = null
     private var output: PcHidOutput? = null
-    var registered by mutableStateOf(false)
+    var registered by mutableStateOf(value = false)
         private set
     var connected by mutableStateOf(false)
         private set
@@ -50,7 +50,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         prefs.edit { putFloat("sensitivity", sensitivity) }
     }
 
-    fun hasPermission() = Build.VERSION.SDK_INT < 31 ||
+    fun hasPermission() = (Build.VERSION.SDK_INT < 31) ||
         context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
     private inline fun safely(block: () -> Unit) {
@@ -117,11 +117,17 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onGetReport(device: BluetoothDevice, type: Byte, id: Byte, bufferSize: Int) = safely {
-            val report = when {
-                type == BluetoothHidDevice.REPORT_TYPE_INPUT && id.toInt() == PcHidReports.KEYBOARD -> PcHidReports.keyboard()
-                type == BluetoothHidDevice.REPORT_TYPE_INPUT && id.toInt() == PcHidReports.MOUSE -> PcHidReports.mouse(if (dragging) 1 else 0)
-                type == BluetoothHidDevice.REPORT_TYPE_INPUT && id.toInt() == PcHidReports.CONSUMER -> PcHidReports.consumer()
-                type == BluetoothHidDevice.REPORT_TYPE_OUTPUT && id.toInt() == PcHidReports.KEYBOARD -> byteArrayOf(0)
+            val report = when (type) {
+                BluetoothHidDevice.REPORT_TYPE_INPUT -> when (id.toInt()) {
+                    PcHidReports.KEYBOARD -> PcHidReports.keyboard()
+                    PcHidReports.MOUSE -> PcHidReports.mouse(if (dragging) 1 else 0)
+                    PcHidReports.CONSUMER -> PcHidReports.consumer()
+                    else -> null
+                }
+                BluetoothHidDevice.REPORT_TYPE_OUTPUT -> when (id.toInt()) {
+                    PcHidReports.KEYBOARD -> byteArrayOf(0)
+                    else -> null
+                }
                 else -> null
             }
             if (report != null) hid?.replyReport(device, type, id, if (bufferSize > 0) report.take(bufferSize).toByteArray() else report)
@@ -129,8 +135,14 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onSetReport(device: BluetoothDevice, type: Byte, id: Byte, data: ByteArray) = safely {
-            hid?.reportError(device, if (type == BluetoothHidDevice.REPORT_TYPE_OUTPUT && id.toInt() == PcHidReports.KEYBOARD)
-                BluetoothHidDevice.ERROR_RSP_SUCCESS else BluetoothHidDevice.ERROR_RSP_UNSUPPORTED_REQ)
+            hid?.reportError(
+                device,
+                if (type == BluetoothHidDevice.REPORT_TYPE_OUTPUT && id.toInt() == PcHidReports.KEYBOARD) {
+                    BluetoothHidDevice.ERROR_RSP_SUCCESS
+                } else {
+                    BluetoothHidDevice.ERROR_RSP_UNSUPPORTED_REQ
+                },
+            )
         }
     }
 
@@ -200,8 +212,8 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     fun connect(device: BluetoothDevice): Unit = safely {
         if (!registered) { start(); return@safely }
         if (host != null && host != device) { status = "Сначала отключи текущий компьютер"; return@safely }
-        if (hid?.connect(device) == true) status = "Подключаемся к ${device.name ?: "компьютеру"}…"
-        else status = "Подключение не удалось. Проверь Bluetooth на ПК и повтори"
+        status = if (hid?.connect(device) == true) "Подключаемся к ${device.name ?: "компьютеру"}…"
+        else "Подключение не удалось. Проверь Bluetooth на ПК и повтори"
     }
     fun disconnect() = safely { releaseInputs(); host?.let { hid?.disconnect(it) } }
     fun key(code: Int) {

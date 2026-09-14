@@ -39,7 +39,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     var recording by mutableStateOf(value = false)
     var message by mutableStateOf(value = "")
     
-    var keyboardVisible by mutableStateOf(false)
+    var keyboardVisible by mutableStateOf(value = false)
         private set
     var keyboardValue by mutableStateOf(TextFieldValue())
         private set
@@ -79,7 +79,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             for (command in commands) {
-                if (!connected || command.generation != connectionGeneration) continue
+                if (!connected || (command.generation != connectionGeneration)) continue
                 try {
                     withContext(Dispatchers.IO) {
                         if (command.action != null) command.action.invoke(client)
@@ -87,8 +87,9 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                         else if (command.value == null) client.submitKeyboard(command.epoch)
                         else client.editKeyboard(command.epoch, command.revision, command.value)
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    if (e is CancellationException) throw e
                     Log.e("AirRemote", "TV command failed", e)
                     if (e is java.io.IOException) client.close()
                     message = e.message ?: "Не удалось отправить команду на ТВ"
@@ -146,12 +147,14 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (previous.text == value.text && previous.selection == value.selection) return
         keyboardRevision++
         
-        commands.trySend(TvCommand(
-            connectionGeneration,
-            keyboardEpoch, 
-            KeyboardText(value.text, value.selection.start, value.selection.end),
-            revision = keyboardRevision,
-        ))
+        commands.trySend(
+            TvCommand(
+                connectionGeneration,
+                keyboardEpoch,
+                KeyboardText(value.text, value.selection.start, value.selection.end),
+                revision = keyboardRevision,
+            )
+        )
     }
 
     fun backspaceKeyboard(count: Int = 1) {

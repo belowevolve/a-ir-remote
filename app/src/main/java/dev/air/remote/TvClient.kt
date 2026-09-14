@@ -30,7 +30,7 @@ class TvClient(private val identity: TvIdentity) {
     
     private fun open(host: String, port: Int, pairing: Boolean): SSLSocket {
         val s = identity.context(host, pairing).socketFactory.createSocket() as SSLSocket
-        try {
+        return try {
             s.tcpNoDelay = true
             s.keepAlive = true
             s.soTimeout = 12000
@@ -38,7 +38,7 @@ class TvClient(private val identity: TvIdentity) {
             s.startHandshake()
             // Pairing stays bounded; the remote service may be quiet between heartbeats.
             if (!pairing) s.soTimeout = 65000
-            return s
+            s
         } catch (e: Exception) { s.close(); throw e }
     }
     
@@ -53,7 +53,7 @@ class TvClient(private val identity: TvIdentity) {
     
     fun beginPairing(host: String) {
         cancelPairing()
-        val s = open(host, 6467, true)
+        val s = open(host, 6467, pairing = true)
         pairingSocket = s; pairingHost = host
         try {
             check(exchange(s, pairMessage().setPairingRequest(PairingRequest.newBuilder().setServiceName("air_remote").setClientName("Air Remote")).build()).hasPairingRequestAck())
@@ -91,12 +91,12 @@ class TvClient(private val identity: TvIdentity) {
             socket.also { socket = null }
         }
         voiceReady?.cancel()
-        Dispatchers.IO.dispatch(EmptyCoroutineContext, Runnable { runCatching { closing?.close() } })
+        Dispatchers.IO.dispatch(EmptyCoroutineContext) { runCatching { closing?.close() } }
     }
     
     fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, ready: () -> Unit) {
         val version = synchronized(connectionLock) { connectionVersion }
-        val s = open(host, 6466, false)
+        val s = open(host, 6466, pairing = false)
         try {
             synchronized(connectionLock) {
                 if (version != connectionVersion) throw CancellationException("Соединение отменено")
@@ -131,8 +131,13 @@ class TvClient(private val identity: TvIdentity) {
                 when {
                     msg.hasRemoteConfigure() -> {
                         features = msg.remoteConfigure.code1 and (1 or 2 or 4 or 8 or 16 or 32 or 64 or 512)
-                        send(RemoteMessage.newBuilder().setRemoteConfigure(RemoteConfigure.newBuilder().setCode1(features)
-                            .setDeviceInfo(RemoteDeviceInfo.newBuilder().setUnknown1(1).setUnknown2("1").setPackageName("dev.air.remote").setAppVersion("0.1"))).build())
+                        send(
+                            RemoteMessage.newBuilder().setRemoteConfigure(
+                                RemoteConfigure.newBuilder().setCode1(features).setDeviceInfo(
+                                    RemoteDeviceInfo.newBuilder().setUnknown1(1).setUnknown2("1").setPackageName("dev.air.remote").setAppVersion("0.1"),
+                                ),
+                            ).build(),
+                        )
                     }
                     msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
@@ -152,7 +157,7 @@ class TvClient(private val identity: TvIdentity) {
     }
     
     fun editKeyboard(epoch: Long, revision: Long, value: KeyboardText) = synchronized(writeLock) {
-        check(features and 4 != 0) { "ТВ не поддерживает ввод текста по сети" }
+        check((features and 4) != 0) { "ТВ не поддерживает ввод текста по сети" }
         keyboard.edit(epoch, value, revision)?.let {
             if (Log.isLoggable(IME_TAG, Log.DEBUG)) {
                 Log.d(IME_TAG, "send ime=${it.remoteImeBatchEdit.imeCounter} field=${it.remoteImeBatchEdit.fieldCounter} edits=${it.remoteImeBatchEdit.editInfoCount} length=${value.text.length}")
@@ -175,29 +180,33 @@ class TvClient(private val identity: TvIdentity) {
     fun key(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) = send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
     
     fun launchYouTube() {
-        check(features and 512 != 0) { "ТВ не поддерживает запуск приложений по сети" }
-        send(RemoteMessage.newBuilder().setRemoteAppLinkLaunchRequest(
-            RemoteAppLinkLaunchRequest.newBuilder().setAppLink("https://www.youtube.com/tv"),
-        ).build())
+        check((features and 512) != 0) { "ТВ не поддерживает запуск приложений по сети" }
+        send(
+            RemoteMessage.newBuilder().setRemoteAppLinkLaunchRequest(
+                RemoteAppLinkLaunchRequest.newBuilder().setAppLink("https://www.youtube.com/tv"),
+            ).build(),
+        )
     }
     
     suspend fun startVoice(): Int {
-        check(features and 8 != 0) { "ТВ не сообщил о поддержке голоса" }
+        check((features and 8) != 0) { "ТВ не сообщил о поддержке голоса" }
         val deferred = CompletableDeferred<Int>(); voiceReady = deferred
-        try {
+        return try {
             key(84)
             val id = withTimeout(5.seconds) { deferred.await() }
             send(RemoteMessage.newBuilder().setRemoteVoiceBegin(RemoteVoiceBegin.newBuilder().setSessionId(id)).build())
-            return id
+            id
         } finally { voiceReady = null }
     }
     
     fun audio(id: Int, bytes: ByteArray) {
         bytes.asList().chunked(20 * 1024).forEach { chunk ->
-            val samples = chunk.toByteArray().let { if (it.size < 8 * 1024) it.copyOf(8 * 1024) else it }
-            send(RemoteMessage.newBuilder().setRemoteVoicePayload(
-                RemoteVoicePayload.newBuilder().setSessionId(id).setSamples(ByteString.copyFrom(samples)),
-            ).build())
+            val samples = chunk.toByteArray().let { if (it.size < (8 * 1024)) it.copyOf(8 * 1024) else it }
+            send(
+                RemoteMessage.newBuilder().setRemoteVoicePayload(
+                    RemoteVoicePayload.newBuilder().setSessionId(id).setSamples(ByteString.copyFrom(samples)),
+                ).build(),
+            )
         }
     }
     
