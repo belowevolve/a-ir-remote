@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -87,18 +86,15 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
         snackbarHost = { SnackbarHost(snackbar) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { paddingValues ->
-        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            val viewportHeight = maxHeight
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Column(
                 modifier = Modifier
                     .widthIn(max = TvLayout.MaxWidth)
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .heightIn(min = viewportHeight)
-                    .padding(horizontal = RemoteLayout.ScreenPadding)
-                    .padding(bottom = RemoteLayout.SmallGap),
+                    .padding(horizontal = RemoteLayout.ScreenPadding),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
+                verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
             ) {
                 AppHeader(
                     title = if (model.connected) model.tvName else "Не подключен",
@@ -141,7 +137,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                                 modifier = Modifier.size(TvLayout.AppIconSize),
                             )
                             Spacer(Modifier.width(RemoteLayout.SmallGap))
-                                Text("YouTube", style = MaterialTheme.typography.titleMedium)
+                            Text("YouTube", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                     RemoteButton(
@@ -161,14 +157,11 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     ColorButton(RemoteColors.Blue, Modifier.weight(1f)) { model.key(186) }
                 }
 
-                Spacer(Modifier.weight(1f))
                 BoxWithConstraints(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Header, action rows, color keys, and gaps reserve space for the bottom controls.
-                    val fixedHeight = RemoteLayout.HeaderSize + RemoteLayout.ActionSize * 4 + TvLayout.ColorKeyHeight + RemoteLayout.Gap * 11
-                    val diameter = minOf(maxWidth, TvLayout.DpadMaxSize, (viewportHeight - fixedHeight).coerceAtLeast(TvLayout.DpadMinSize))
+                    val diameter = minOf(maxWidth, maxHeight, TvLayout.DpadMaxSize)
                     Box(
                         modifier = Modifier
                             .size(diameter)
@@ -258,7 +251,6 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     }
                 }
 
-                Spacer(Modifier.weight(1f))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -333,7 +325,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         onValueChange = { address = it },
                         label = { Text("IP-адрес ТВ") },
                         singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     TextButton(onClick = { model.key(178) }) { Text("Входы / HDMI") }
                     TextButton(onClick = { model.key(166) }) { Text("Следующий канал") }

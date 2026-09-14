@@ -59,8 +59,8 @@ internal fun PcScreen(model: PcRemoteModel) {
             }
         }
         Column(
-            Modifier.fillMaxSize().padding(bottom = RemoteLayout.SmallGap),
-            verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
         ) {
             Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
                 AppHeader(if (model.connected) model.deviceName else "Не подключен",

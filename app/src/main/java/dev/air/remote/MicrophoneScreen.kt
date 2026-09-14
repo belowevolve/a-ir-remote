@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.core.content.edit
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,11 +21,14 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
+import kotlin.math.sqrt
 
 @Composable
 fun MicrophoneScreen(beforeStart: () -> Unit) {
@@ -56,11 +61,8 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
             error = "Разреши доступ к устройствам поблизости для подключения к ПК"
         else start()
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val viewportHeight = maxHeight
-        Column(Modifier.fillMaxSize().heightIn(min = viewportHeight)
-            .padding(horizontal = RemoteLayout.ScreenPadding).padding(bottom = RemoteLayout.SmallGap),
-            verticalArrangement = Arrangement.spacedBy(RemoteLayout.Gap)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = RemoteLayout.ScreenPadding),
+            verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
             AppHeader(
                 title = when {
                     state.streaming -> host
@@ -104,33 +106,33 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
             }
 
         }
-    }
-
 }
 
 @Composable
 private fun MicrophoneButton(muted: Boolean, peak: Float, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val level by animateFloatAsState(
+        targetValue = if (muted) 0f else sqrt(peak.coerceIn(0f, 1f)),
+        animationSpec = tween(100), label = "microphone level",
+    )
     Surface(
         onClick = onClick,
         modifier = modifier.height(RemoteLayout.ActionSize).semantics {
             stateDescription = if (muted) "Микрофон выключен" else "Микрофон включён"
         },
         shape = RemoteLayout.ActionShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
-        Column(Modifier.padding(horizontal = RemoteLayout.ScreenPadding),
-            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(contentAlignment = Alignment.Center) {
             Icon(if (muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
                 if (muted) "Включить микрофон" else "Выключить микрофон",
-                Modifier.size(RemoteLayout.ActionIconSize))
-            Spacer(Modifier.height(RemoteLayout.SmallGap))
-            LinearProgressIndicator(
-                progress = { if (muted) 0f else peak.coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(RemoteLayout.MeterHeight),
-                color = if (!muted && peak >= 0.98f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                drawStopIndicator = {},
-            )
+                Modifier.size(RemoteLayout.MicrophoneIconSize),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+            if (!muted) Icon(Icons.Rounded.Mic, null,
+                Modifier.size(RemoteLayout.MicrophoneIconSize).drawWithContent {
+                    clipRect(top = size.height * (1f - level)) { this@drawWithContent.drawContent() }
+                },
+                tint = if (peak >= 0.98f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
         }
     }
 }

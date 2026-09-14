@@ -25,12 +25,12 @@ fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Bo
             detectHorizontalDragGestures(
                 onDragStart = { distance = 0f },
                 onDragEnd = {
-                    if (abs(distance) > 48.dp.toPx()) mode = (mode + if (distance < 0) 1 else -1).coerceIn(0, 2)
+                    if (abs(distance) > 48.dp.toPx()) mode = Math.floorMod(mode + if (distance < 0) 1 else -1, 3)
                 },
             ) { change, dx -> change.consume(); distance += dx }
         }) {
             ModeTabs(mode, onSelected = { mode = it })
-            Box(Modifier.weight(1f)) {
+            Box(Modifier.weight(1f).padding(vertical = RemoteLayout.SmallGap)) {
                 when (mode) {
                     1 -> PcScreen(pc)
                     2 -> MicrophoneScreen(beforeStart = onPcActivated)
