@@ -5,19 +5,21 @@ plugins {
 }
 
 android {
-    namespace = "dev.air.remote"
+    namespace = "belowevolve.airremote"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.air.remote"
+        applicationId = "belowevolve.airremote"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.1.2"
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
+        resValues = true
     }
 
     sourceSets {
@@ -42,7 +44,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            resValue("string", "app_name", "Air Remote Dev")
+        }
         release {
+            resValue("string", "app_name", "Air Remote")
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true

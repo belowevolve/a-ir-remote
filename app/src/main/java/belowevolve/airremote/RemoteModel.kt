@@ -1,0 +1,430 @@
+package belowevolve.airremote
+
+import android.app.Application
+import android.content.Context
+import android.hardware.ConsumerIrManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.core.content.edit
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.channels.Channel
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class RemoteModel(app: Application) : AndroidViewModel(app) {
+    var status by mutableStateOf(value = "Выберите телевизор")
+    var connected by mutableStateOf(value = false)
+    var pairing by mutableStateOf(value = false)
+    var busy by mutableStateOf(value = false)
+    var recording by mutableStateOf(value = false)
+    var message by mutableStateOf(value = "")
+    
+    var keyboardVisible by mutableStateOf(value = false)
+        private set
+    var keyboardValue by mutableStateOf(TextFieldValue())
+        private set
+    var keyboardInputType by mutableIntStateOf(1)
+        private set
+    var keyboardImeOptions by mutableIntStateOf(0)
+        private set
+
+    private var keyboardEpoch = 0L
+    private var keyboardRevision = 0L
+    private var connectionGeneration = 0L
+
+    private data class TvCommand(val generation: Long, val epoch: Long, val value: KeyboardText?, val backspaces: Int = 0, val revision: Long = 0, val action: (TvClient.() -> Unit)? = null)
+    private val commands = Channel<TvCommand>(Channel.UNLIMITED)
+
+    val devices = mutableStateListOf<Pair<String, String>>()
+    private val prefs = app.getSharedPreferences("remote", Context.MODE_PRIVATE)
+    var host by mutableStateOf(value = prefs.getString("host", "")!!)
+    var tvName by mutableStateOf(value = prefs.getString("name", "Haier S2 Pro")!!)
+    private val powerSignal by lazy {
+        IrSignal.parse(prefs.getString("ir", null)?.takeIf { it.isNotBlank() } ?: IrSignal.haierPower())
+    }
+    
+    private val ir = app.getSystemService(ConsumerIrManager::class.java)
+    val hasIr = ir?.hasIrEmitter() == true
+    
+    private val identity by lazy { TvIdentity(app) }
+    private val client by lazy { initialized = true; TvClient(identity) }
+    
+    private var connectionJob: Job? = null
+    private var voiceJob: Job? = null
+    private val nsd = app.getSystemService(NsdManager::class.java)
+    private var discovery: NsdManager.DiscoveryListener? = null
+    private var foreground = false
+    private var initialized = false
+
+    init {
+        viewModelScope.launch {
+            for (command in commands) {
+                if (!connected || (command.generation != connectionGeneration)) continue
+                try {
+                    withContext(Dispatchers.IO) {
+                        if (command.action != null) command.action.invoke(client)
+                        else if (command.backspaces > 0) client.backspaceKeyboard(command.epoch, command.backspaces)
+                        else if (command.value == null) client.submitKeyboard(command.epoch)
+                        else client.editKeyboard(command.epoch, command.revision, command.value)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("AirRemote", "TV command failed", e)
+                    if (e is java.io.IOException) client.close()
+                    message = e.message ?: "Не удалось отправить команду на ТВ"
+                }
+            }
+        }
+    }
+
+    private fun resetKeyboard() {
+        connectionGeneration++
+        keyboardVisible = false
+        keyboardValue = TextFieldValue()
+        keyboardEpoch = 0L
+        keyboardRevision = 0L
+    }
+
+    private fun receiveKeyboard(update: KeyboardUpdate) {
+        keyboardInputType = update.inputType
+        keyboardImeOptions = update.imeOptions
+        
+        if (update.epoch != keyboardEpoch || update.revision >= keyboardRevision) {
+            keyboardEpoch = update.epoch
+            keyboardRevision = update.revision
+            val text = update.value
+            val selection = TextRange(text.start, text.end)
+            if (keyboardValue.text != text.text || keyboardValue.selection != selection) {
+                keyboardValue = TextFieldValue(text.text, selection)
+            }
+        }
+
+        if (update.show) {
+            keyboardVisible = true
+        }
+    }
+
+    fun showKeyboard() {
+        if (!connected) {
+            message = "Сначала подключите ТВ"
+            connect()
+            return
+        }
+        keyboardVisible = true
+    }
+
+    fun hideKeyboard() {
+        keyboardVisible = false
+    }
+
+    fun editKeyboard(value: TextFieldValue) {
+        if (!connected) return
+        
+        val previous = keyboardValue
+        keyboardValue = value
+        
+        if (previous.text == value.text && previous.selection == value.selection) return
+        keyboardRevision++
+        
+        commands.trySend(
+            TvCommand(
+                connectionGeneration,
+                keyboardEpoch,
+                KeyboardText(value.text, value.selection.start, value.selection.end),
+                revision = keyboardRevision,
+            )
+        )
+    }
+
+    fun backspaceKeyboard(count: Int = 1) {
+        if (!connected || count <= 0) return
+        commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null, count))
+    }
+
+    fun deleteKeyboardCharacter() {
+        val value = keyboardValue
+        val end = value.selection.max
+        val start = if (value.selection.collapsed && end > 0) value.text.offsetByCodePoints(end, -1) else value.selection.min
+        if (start == end) backspaceKeyboard()
+        else editKeyboard(TextFieldValue(value.text.removeRange(start, end), TextRange(start)))
+    }
+
+    fun submitKeyboard() {
+        if (!connected) return
+        commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null))
+    }
+
+    fun resume() {
+        foreground = true
+        discover()
+        if (host.isNotBlank()) connect()
+    }
+
+    fun pause() {
+        foreground = false
+        resetKeyboard()
+        stopVoice()
+        connectionJob?.cancel()
+        connectionJob = null
+        if (initialized) client.close()
+        connected = false
+        stopDiscovery()
+    }
+
+    fun discover() {
+        if (discovery != null) return
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(type: String) = Unit
+            override fun onDiscoveryStopped(type: String) = Unit
+            override fun onStartDiscoveryFailed(type: String, code: Int) {
+                discovery = null
+            }
+            override fun onStopDiscoveryFailed(type: String, code: Int) = Unit
+            override fun onServiceLost(service: NsdServiceInfo) = Unit
+            override fun onServiceFound(service: NsdServiceInfo) {
+                @Suppress("DEPRECATION")
+                nsd.resolveService(
+                    service,
+                    object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(info: NsdServiceInfo, code: Int) = Unit
+                        override fun onServiceResolved(info: NsdServiceInfo) {
+                            val address = info.host?.hostAddress ?: return
+                            viewModelScope.launch {
+                                if (devices.none { it.second == address }) {
+                                    devices.add(info.serviceName to address)
+                                }
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        discovery = listener
+        nsd.discoverServices("_androidtvremote2._tcp.", NsdManager.PROTOCOL_DNS_SD, listener)
+    }
+
+    private fun stopDiscovery() {
+        discovery?.let { runCatching { nsd.stopServiceDiscovery(it) } }
+        discovery = null
+    }
+
+    fun select(name: String, address: String) {
+        host = address.trim()
+        tvName = name
+        prefs.edit {
+            putString("host", host)
+            putString("name", tvName)
+        }
+        beginPairing()
+    }
+
+    private fun action(block: suspend () -> Unit) = viewModelScope.launch {
+        try {
+            withContext(Dispatchers.IO) { block() }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            message = e.message ?: "Ошибка соединения"
+        }
+    }
+
+    fun beginPairing(targetHost: String = host) {
+        if (targetHost.isBlank()) {
+            message = "Введите IP-адрес ТВ"
+            return
+        }
+        if (busy) return
+        busy = true
+        connectionJob?.cancel()
+        client.close()
+        connected = false
+        resetKeyboard()
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { client.beginPairing(targetHost) }
+                pairing = true
+                status = "Введите код с экрана ТВ"
+            } catch (e: Exception) {
+                Log.e("AirRemote", "Pairing failed", e)
+                status = "Сопряжение не удалось"
+                message = e.message ?: "Не удалось начать сопряжение"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun finishPairing(pin: String) {
+        if (busy) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { client.finishPairing(pin.trim()) }
+                pairing = false
+                connect()
+            } catch (e: Exception) {
+                Log.e("AirRemote", "PIN verification failed", e)
+                message = e.message ?: "Не удалось подтвердить код"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun cancelPairing() {
+        pairing = false
+        action { client.cancelPairing() }
+    }
+
+    fun connect() {
+        if (!foreground || (connectionJob?.isActive == true)) return
+        connectionJob = viewModelScope.launch {
+            val paired = withContext(Dispatchers.IO) { identity.hasPin(host) }
+            if (!paired) {
+                status = "Нужно сопряжение"
+                return@launch
+            }
+            while (isActive) {
+                status = "Подключение…"
+                val generation = connectionGeneration
+                try {
+                    withContext(Dispatchers.IO) {
+                        client.listen(host, onKeyboard = { update ->
+                            viewModelScope.launch {
+                                if (foreground && generation == connectionGeneration) receiveKeyboard(update)
+                            }
+                        }) {
+                            viewModelScope.launch {
+                                if (foreground && generation == connectionGeneration) {
+                                    connected = true
+                                    status = "Подключён по Wi-Fi"
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    Log.w("AirRemote", "TV disconnected", e)
+                    connected = false
+                    resetKeyboard()
+                    status = "ТВ недоступен · ИК работает отдельно"
+                }
+                delay(3.seconds)
+            }
+        }
+    }
+
+    // All user commands share one FIFO, including keyboard edits and held-key edges.
+    private fun enqueue(action: TvClient.() -> Unit) {
+        if (connected) commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null, action = action))
+    }
+
+    fun holdOk(pressed: Boolean) {
+        enqueue { key(23, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+    }
+
+    fun key(code: Int) {
+        if (connected) {
+            enqueue { key(code) }
+        } else {
+            message = "Сначала подключите ТВ"
+            connect()
+        }
+    }
+
+    fun launchYouTube() {
+        if (connected) {
+            enqueue { launchYouTube() }
+        } else {
+            message = "Сначала подключите ТВ"
+        }
+    }
+
+    fun holdPower(pressed: Boolean) {
+        enqueue { key(26, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+    }
+
+    fun power() {
+        if (!hasIr) { key(26); return }
+        action {
+            val signal = powerSignal
+            ir.transmit(signal.first, signal.second)
+        }
+        connect()
+    }
+
+    fun startVoice() {
+        if (voiceJob?.isActive == true) return
+        if (!connected) {
+            message = "Сначала подключите ТВ"
+            return
+        }
+        recording = true
+        voiceJob = action {
+            var recorder: AudioRecord? = null
+            var id: Int? = null
+            try {
+                id = client.startVoice()
+                val minimum = AudioRecord.getMinBufferSize(
+                    8000,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                )
+                check(minimum > 0) { "Микрофон не поддерживает формат записи" }
+                @Suppress("MissingPermission")
+                val input = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    8000,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(minimum, 8192),
+                )
+                recorder = input
+                check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон не готов" }
+                input.startRecording()
+                val buffer = ByteArray(20 * 1024)
+                val deadline = System.currentTimeMillis() + 30000
+                while ((currentCoroutineContext().isActive) && (System.currentTimeMillis() < deadline)) {
+                    val count = input.read(buffer, 0, buffer.size)
+                    check(count > 0) { "Ошибка записи микрофона: $count" }
+                    client.audio(id, buffer.copyOf(count))
+                }
+            } finally {
+                recorder?.let { runCatching { it.stop() }; it.release() }
+                id?.let { runCatching { client.endVoice(it) } }
+                withContext(NonCancellable + Dispatchers.Main) { recording = false }
+            }
+        }
+    }
+
+    fun stopVoice() {
+        voiceJob?.cancel()
+    }
+
+    override fun onCleared() {
+        pause()
+        if (initialized) client.cancelPairing()
+    }
+}
+
+/** Portable format: carrier frequency in Hz followed by alternating on/off durations in µs. */

@@ -110,13 +110,34 @@ PCM Float32 (PCM16 при отсутствии поддержки), без сж�
 Для сборки нужны JDK 17 или новее и Android SDK 37. Путь к SDK задаётся через
 `ANDROID_HOME` либо `sdk.dir` в локальном `local.properties`.
 
-## Production APK
+## Сборка APK
+
+| Вариант | Приложение | Application ID | APK |
+| --- | --- | --- | --- |
+| `debug` | Air Remote Dev | `belowevolve.airremote.dev` | `app/build/outputs/apk/debug/app-debug.apk` |
+| `release` | Air Remote | `belowevolve.airremote` | `app/build/outputs/apk/release/app-release.apk` |
+
+### Разработка
+
+```sh
+./gradlew assembleDebug
+```
+
+В Android Studio используется вариант сборки `debug`. Dev-версия имеет
+оранжевую иконку со знаком `<>` и устанавливается отдельно от release.
+Разрешения, настройки и сопряжение с ТВ хранятся независимо для каждой версии.
+Bluetooth HID доступен одному приложению за раз.
+
+### Релиз
 
 ```sh
 bash scripts/build-release.sh
 ```
 
-Подписанный APK: `app/build/outputs/apk/release/app-release.apk`.
-Первый запуск создаёт ключ в `.signing/` (вне Git): сохрани резервную копию папки для будущих обновлений.
-Дальше работает и `./gradlew assembleRelease`. Повышай `versionCode` перед выпуском обновления.
-Release не обновит установленную debug-версию с другой подписью: переход требует удаления debug-приложения с потерей его настроек.
+Скрипт создаёт ключ подписи при первой сборке и сохраняет его в `.signing/`.
+Каталог исключён из Git; резервная копия необходима для подписи последующих
+обновлений. При наличии ключа сборка также доступна через `./gradlew assembleRelease`.
+
+Версия задаётся в `app/build.gradle.kts`: `versionName` — номер версии,
+`versionCode` — целочисленный номер сборки, увеличиваемый для каждого релиза.
+Обновление с сохранением данных требует прежних Application ID и ключа подписи.

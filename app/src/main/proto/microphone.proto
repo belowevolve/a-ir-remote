@@ -1,6 +1,6 @@
 syntax = "proto3";
-package dev.air.remote.mic;
-option java_package = "dev.air.remote.mic";
+package belowevolve.airremote.mic;
+option java_package = "belowevolve.airremote.mic";
 option java_outer_classname = "MicrophoneProtocol";
 
 // Wire-compatible with AndroidMic's AudioPacketMessage (TCP).
