@@ -3,6 +3,7 @@ package belowevolve.airremote
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -13,77 +14,71 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
-import android.view.ViewConfiguration
 
 @Composable
 internal fun Trackpad(model: PcRemoteModel, modifier: Modifier = Modifier) {
-    val doubleTapSlop = ViewConfiguration.get(LocalContext.current).scaledDoubleTapSlop.toFloat()
     Box(
         modifier = modifier.fillMaxWidth()
             .clip(KeyboardLayout.TrackpadShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .semantics { contentDescription = "Трекпад" }
             .pointerInput(model.connected) {
-                var remainderX = 0f
-                var remainderY = 0f
-                var scrollRemainder = 0f
-                val gestures = TrackpadGestures(
-                    slop = viewConfiguration.touchSlop,
-                    doubleTapSlop = doubleTapSlop,
-                    doubleTapTimeout = viewConfiguration.doubleTapTimeoutMillis,
-                    holdTimeout = viewConfiguration.longPressTimeoutMillis,
-                    move = { dx, dy ->
-                        remainderX += dx / density * model.sensitivity
-                        remainderY += dy / density * model.sensitivity
-                        val x = remainderX.toInt()
-                        val y = remainderY.toInt()
-                        if (x != 0 || y != 0) model.move(x, y)
-                        remainderX -= x
-                        remainderY -= y
-                    },
-                    scroll = { dy ->
-                        scrollRemainder -= dy / 24.dp.toPx()
-                        val steps = scrollRemainder.toInt()
-                        if (steps != 0) model.move(0, 0, steps)
-                        scrollRemainder -= steps
-                    },
-                    click = { model.click(right = it) },
-                    button = { model.dragButton(pressed = it) },
-                )
-                try {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        currentEvent.changes.forEach { it.consume() }
-                        remainderX = 0f
-                        remainderY = 0f
-                        scrollRemainder = 0f
-                        gestures.frame(down.uptimeMillis, currentEvent.changes.map {
-                            TrackpadGestures.Contact(it.id.value, it.position.x, it.position.y, it.pressed)
-                        })
-                        var now = down.uptimeMillis
-                        try {
-                            while (gestures.active) {
-                                val timeout = gestures.holdDelay(now)
-                                val event = if (timeout != null) {
-                                    withTimeoutOrNull(timeout) { awaitPointerEvent(PointerEventPass.Initial) }
-                                } else awaitPointerEvent(PointerEventPass.Initial)
-                                if (event == null) {
-                                    gestures.hold()
-                                    continue
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    down.consume()
+                    var travel = 0f
+                    var fingers = 1
+                    var remainderX = 0f
+                    var remainderY = 0f
+                    var scroll = 0f
+                    var elapsed = 0L
+                    var held = false
+                    val origins = mutableMapOf(down.id to down.position)
+                    try {
+                        do {
+                            // Own the gesture before the surrounding scroll container consumes it.
+                            val event = if (!held && fingers == 1 && travel < viewConfiguration.touchSlop) {
+                                withTimeoutOrNull((viewConfiguration.longPressTimeoutMillis - elapsed).coerceAtLeast(1L)) {
+                                    awaitPointerEvent(PointerEventPass.Initial)
                                 }
-                                now = event.changes.maxOf { it.uptimeMillis }
-                                gestures.frame(now, event.changes.map {
-                                    TrackpadGestures.Contact(it.id.value, it.position.x, it.position.y, it.pressed)
-                                })
-                                event.changes.forEach { it.consume() }
+                            } else awaitPointerEvent(PointerEventPass.Initial)
+                            if (event == null) {
+                                held = true
+                                model.dragButton(pressed = true)
+                                continue
                             }
-                        } finally {
-                            if (gestures.active) gestures.cancel()
-                        }
+                            elapsed = event.changes.maxOf { it.uptimeMillis } - down.uptimeMillis
+                            fingers = maxOf(fingers, event.changes.count { it.pressed })
+                            event.changes.forEach { change ->
+                                val origin = origins.getOrPut(change.id) { change.position }
+                                travel = maxOf(travel, (change.position - origin).getDistance())
+                            }
+                            if (fingers > 1 && model.dragging) model.dragButton(pressed = false)
+                            val moving = event.changes.filter { it.pressed && it.previousPressed }
+                            if (moving.isNotEmpty()) {
+                                val dx = moving.sumOf { it.positionChangeIgnoreConsumed().x.toDouble() }.toFloat() / moving.size
+                                val dy = moving.sumOf { it.positionChangeIgnoreConsumed().y.toDouble() }.toFloat() / moving.size
+                                if (moving.size >= 2) {
+                                    if (model.dragging) model.dragButton(pressed = false)
+                                    scroll += -dy / 24.dp.toPx()
+                                    val steps = scroll.toInt()
+                                    if (steps != 0) { model.move(0, 0, steps); scroll -= steps }
+                                } else if (fingers == 1) {
+                                    remainderX += (dx / density) * model.sensitivity
+                                    remainderY += (dy / density) * model.sensitivity
+                                    val x = remainderX.toInt()
+                                    val y = remainderY.toInt()
+                                    if ((x != 0) || (y != 0)) { model.move(x, y); remainderX -= x; remainderY -= y }
+                                }
+                            }
+                            event.changes.forEach { it.consume() }
+                            if (event.changes.none { it.pressed }) break
+                        } while (true)
+                        if ((travel < viewConfiguration.touchSlop) && (elapsed < viewConfiguration.longPressTimeoutMillis) && !held)
+                            model.click(right = fingers > 1)
+                    } finally {
+                        if (model.dragging) model.dragButton(pressed = false)
                     }
-                } finally {
-                    gestures.cancel()
                 }
             },
     )
