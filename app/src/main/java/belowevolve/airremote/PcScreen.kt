@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.KeyboardHide
 import androidx.compose.material.icons.rounded.Keyboard
@@ -24,6 +25,7 @@ import androidx.compose.ui.platform.LocalView
 internal fun PcScreen(model: PcRemoteModel) {
     var devicesVisible by rememberSaveable { mutableStateOf(false) }
     var keyboardVisible by rememberSaveable { mutableStateOf(true) }
+    var numpad by rememberSaveable { mutableStateOf(false) }
     var russian by rememberSaveable { mutableStateOf(false) }
     var launchError by remember { mutableStateOf("") }
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
@@ -48,6 +50,14 @@ internal fun PcScreen(model: PcRemoteModel) {
             Row(horizontalArrangement = Arrangement.Center) {
                 IconButton(onClick = { russian = !russian }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
                     Icon(Icons.Rounded.Language, if (russian) "Русская раскладка" else "English")
+                }
+                IconToggleButton(
+                    checked = numpad,
+                    onCheckedChange = { numpad = it; keyboardVisible = true },
+                    modifier = Modifier.size(KeyboardLayout.ToolbarSize),
+                ) {
+                    Icon(if (numpad) Icons.Rounded.Keyboard else Icons.Rounded.Dialpad,
+                        if (numpad) "Показать буквенную клавиатуру" else "Показать нумпад и дополнительные клавиши")
                 }
                 IconButton(onClick = { settingsVisible = true }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
                     Icon(Icons.Rounded.Tune, "Настройки")
@@ -74,7 +84,7 @@ internal fun PcScreen(model: PcRemoteModel) {
                 Trackpad(model, Modifier.fillMaxSize())
             }
             if (keyboardVisible) {
-                PcKeyboard(model, russian, keyHeight, toolbar)
+                PcKeyboard(model, russian, keyHeight, numpad, toolbar)
             } else {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { toolbar() }
             }

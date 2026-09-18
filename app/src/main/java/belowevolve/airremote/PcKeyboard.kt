@@ -22,23 +22,31 @@ private val keyboardRows = listOf(
     listOf("Caps" to 57) + "asdfghjkl".map { it.toString() to (4 + (it - 'a')) } + listOf(";" to 51, "'" to 52, "Enter" to 40),
     listOf("Shift" to -2) + "zxcvbnm".map { it.toString() to (4 + (it - 'a')) } + listOf("," to 54, "." to 55, "/" to 56, "Shift" to -2),
 )
+// USB HID Keyboard/Keypad usages, including distinct keypad digits and Enter.
+private val numpadRows = listOf(
+    listOf("PrtSc" to 70, "ScrLk" to 71, "Pause" to 72, "Num" to 83, "/" to 84, "*" to 85, "−" to 86),
+    listOf("Insert" to 73, "Home" to 74, "PgUp" to 75, "7" to 95, "8" to 96, "9" to 97, "+" to 87),
+    listOf("Del" to 76, "End" to 77, "PgDn" to 78, "4" to 92, "5" to 93, "6" to 94, "⌫" to 42),
+    listOf("Esc" to 41, "Tab" to 43, "Menu" to 101, "1" to 89, "2" to 90, "3" to 91, "Enter" to 88),
+    listOf("Shift" to -2, "Space" to 44, "0" to 98, "." to 99, "Enter" to 88),
+)
 private const val latin = "`qwertyuiop[]asdfghjkl;'zxcvbnm,."
 private const val cyrillic = "ёйцукенгшщзхъфывапролджэячсмитьбю"
 
 @Composable
-internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = KeyboardLayout.KeyHeight, toolbar: @Composable () -> Unit = {}) {
+internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = KeyboardLayout.KeyHeight, numpad: Boolean = false, toolbar: @Composable () -> Unit = {}) {
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp, LocalKeyHeight provides keyHeight) {
         Column(Modifier.fillMaxWidth().padding(horizontal = KeyboardLayout.EdgePadding), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
-            keyboardRows.forEach { row ->
+            (if (numpad) numpadRows else keyboardRows).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
                     row.forEach { (label, code) ->
                         val index = if (label.length == 1) latin.indexOf(label) else -1
                         PcKey(
-                            label = if (russian && (index >= 0)) cyrillic[index].toString() else label,
-                            modifier = Modifier.weight(if (label.length > 1 && label !in listOf("Esc", "Del") && !label.startsWith("F")) 1.3f else 1f),
+                            label = if (!numpad && russian && (index >= 0)) cyrillic[index].toString() else label,
+                            modifier = Modifier.weight(if (numpad) { if (code == 44 || code == 98) 2f else 1f } else if (label.length > 1 && label !in listOf("Esc", "Del") && !label.startsWith("F")) 1.3f else 1f),
                             enabled = model.connected,
                             selected = (code == -2) && ((model.modifiers and 2) != 0),
-                            repeatOnHold = code == 42 || code == 76,
+                            repeatOnHold = code in listOf(42, 75, 76, 78),
                         ) {
                             if (code == -2) model.toggleModifier(2) else model.key(code)
                         }
@@ -61,7 +69,7 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                 PcKey("Win", Modifier.weight(1f), model.connected) { model.windowsKey() }
-                Box(Modifier.weight(2f), contentAlignment = Alignment.Center) { toolbar() }
+                Box(Modifier.width(KeyboardLayout.ToolbarSize * 4), contentAlignment = Alignment.Center) { toolbar() }
                 Column(Modifier.weight(1.65f), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
                     PcKey("↑", Modifier.align(Alignment.CenterHorizontally).width(KeyboardLayout.ArrowWidth), model.connected, repeatOnHold = true) { model.key(82) }
                     Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
