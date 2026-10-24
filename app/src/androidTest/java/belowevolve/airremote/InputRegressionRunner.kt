@@ -78,7 +78,7 @@ class InputRegressionRunner : Instrumentation() {
         val client = TvClient(TvIdentity(targetContext))
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
         fun connect(): Thread = Thread {
-            try { client.listen(host, { updates.offer(it) }, {}, {}) }
+            try { client.listen(host, { updates.offer(it) }, {}, ready = {}) }
             catch (error: Throwable) { failure.set(error) }
         }.apply { start() }
         fun awaitText(): KeyboardUpdate {

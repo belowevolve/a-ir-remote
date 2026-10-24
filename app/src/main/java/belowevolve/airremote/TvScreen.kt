@@ -94,7 +94,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     RemoteButton(
                         icon = Icons.Rounded.PowerSettingsNew,
                         label = "Питание",
-                        onHold = if (!model.hasIr) model::holdPower else null,
+                        onHold = model::holdPower,
                         modifier = Modifier.size(RemoteLayout.ActionSize),
                         background = RemoteColors.PowerContainer,
                         tint = RemoteColors.Power,

@@ -24,21 +24,26 @@ class TvClient(private val identity: TvIdentity) {
     private val voice = TvVoiceSession()
     private val writeLock = Any()
     private val connectionLock = Any()
+    private val connectingSockets = mutableSetOf<SSLSocket>()
+    private val remotePorts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private var connectionVersion = 0L
     private val keyboard = TvKeyboard()
     
-    private fun open(host: String, port: Int, pairing: Boolean): SSLSocket {
+    private fun open(host: String, port: Int, pairing: Boolean, version: Long? = null): SSLSocket {
         val s = identity.context(host, pairing).socketFactory.createSocket() as SSLSocket
         return try {
+            if (version != null) synchronized(connectionLock) {
+                if (version != connectionVersion) throw CancellationException("Соединение отменено")
+                connectingSockets.add(s)
+            }
             s.tcpNoDelay = true
             s.keepAlive = true
             s.soTimeout = 12000
-            s.connect(InetSocketAddress(host, port), 5000)
+            s.connect(InetSocketAddress(host, port), if (port == 6465) 1500 else 5000)
             s.startHandshake()
-            // Pairing stays bounded; the remote service may be quiet between heartbeats.
-            if (!pairing) s.soTimeout = 65000
             s
         } catch (e: Exception) { s.close(); throw e }
+        finally { synchronized(connectionLock) { connectingSockets.remove(s) } }
     }
     
     private fun pairMessage() = OuterMessage.newBuilder().setProtocolVersion(2).setStatus(OuterMessage.Status.STATUS_OK)
@@ -87,14 +92,27 @@ class TvClient(private val identity: TvIdentity) {
     fun close() {
         val closing = synchronized(connectionLock) {
             connectionVersion++
-            socket.also { socket = null }
+            (connectingSockets.toList() + listOfNotNull(socket)).also {
+                connectingSockets.clear()
+                socket = null
+            }
         }
-        Dispatchers.IO.dispatch(EmptyCoroutineContext) { runCatching { closing?.close() } }
+        Dispatchers.IO.dispatch(EmptyCoroutineContext) { closing.forEach { runCatching { it.close() } } }
     }
     
-    fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, onVoiceRequest: (Boolean) -> Unit, ready: () -> Unit) {
+    fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, onVoiceRequest: (Boolean) -> Unit, ready: (Boolean) -> Unit) {
         val version = synchronized(connectionLock) { connectionVersion }
-        val s = open(host, 6466, pairing = false)
+        // Newer Google TV services expose the same authenticated protocol on a
+        // standby-allowed wake port. Older TVs only have the regular remote port.
+        // Connecting here keeps the remote reachable in standby; it does not
+        // turn on the screen. Remember the working port for older televisions.
+        val preferredPort = remotePorts[host] ?: 6465
+        val s = try {
+            open(host, preferredPort, pairing = false, version = version).also { remotePorts[host] = preferredPort }
+        } catch (_: java.io.IOException) {
+            val fallbackPort = if (preferredPort == 6465) 6466 else 6465
+            open(host, fallbackPort, pairing = false, version = version).also { remotePorts[host] = fallbackPort }
+        }
         try {
             synchronized(connectionLock) {
                 if (version != connectionVersion) throw CancellationException("Соединение отменено")
@@ -138,7 +156,11 @@ class TvClient(private val identity: TvIdentity) {
                     }
                     msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
-                    msg.hasRemoteStart() -> ready()
+                    msg.hasRemoteStart() -> {
+                        // Only an established session may wait for a slow heartbeat.
+                        s.soTimeout = 65000
+                        ready(msg.remoteStart.started)
+                    }
                     msg.hasRemoteVoiceBegin() -> synchronized(writeLock) {
                         if (socket === s) {
                             voice.request(msg.remoteVoiceBegin.sessionId)

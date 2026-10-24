@@ -55,6 +55,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private var keyboardEpoch = 0L
     private var keyboardRevision = 0L
     private var connectionGeneration = 0L
+    private var tvPowered: Boolean? = null
+    private var networkPowerHeld = false
 
     private data class TvCommand(val generation: Long, val action: TvClient.() -> Unit)
     private val commands = Channel<TvCommand>(Channel.UNLIMITED)
@@ -108,6 +110,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     private fun resetConnectionState() {
         connectionGeneration++
+        tvPowered = null
+        networkPowerHeld = false
         voiceRequested = false
         stopVoice()
         keyboardVisible = false
@@ -303,9 +307,18 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         action { client.cancelPairing() }
     }
 
-    fun connect() {
+    fun connect(wake: Boolean = false) {
+        if (wake && foreground) {
+            connectionJob?.cancel()
+            connectionJob = null
+            if (initialized) client.close()
+            connected = false
+            resetConnectionState()
+        }
         if (!foreground || (connectionJob?.isActive == true)) return
         connectionJob = viewModelScope.launch {
+            var wakePending = wake
+            val wakeDeadline = android.os.SystemClock.elapsedRealtime() + 30000
             val paired = withContext(Dispatchers.IO) { identity.hasPin(host) }
             if (!paired) {
                 status = "Нужно сопряжение"
@@ -338,11 +351,18 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                                     }
                                 }
                             }
-                        }) {
+                        }) { powered ->
                             viewModelScope.launch {
                                 if (foreground && generation == connectionGeneration) {
                                     connected = true
+                                    tvPowered = powered
                                     status = "Подключён по Wi-Fi"
+                                    if (wakePending) {
+                                        wakePending = false
+                                        // TV's remote bridge supports POWER, but not WAKEUP.
+                                        // Only toggle after the TV confirms its screen is off.
+                                        if (!powered) key(26)
+                                    }
                                 }
                             }
                         }
@@ -353,6 +373,10 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                     connected = false
                     resetConnectionState()
                     status = "ТВ недоступен · ИК работает отдельно"
+                    if (wakePending && android.os.SystemClock.elapsedRealtime() >= wakeDeadline) {
+                        message = "ТВ не ответил. Проверь сетевой режим ожидания в настройках телевизора"
+                        break
+                    }
                 }
                 delay(3.seconds)
             }
@@ -386,16 +410,38 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun holdPower(pressed: Boolean) {
-        enqueue { key(26, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+        if (hasIr) {
+            // One power signal after the long-press threshold, never repeated toggles.
+            if (pressed) powerIr()
+            return
+        }
+        if (!pressed) {
+            if (networkPowerHeld) {
+                networkPowerHeld = false
+                enqueue { key(26, remote.Remotemessage.RemoteDirection.END_LONG) }
+            }
+            return
+        }
+        if (!connected || tvPowered == false) {
+            connect(wake = true)
+            return
+        }
+        networkPowerHeld = true
+        enqueue { key(26, remote.Remotemessage.RemoteDirection.START_LONG) }
     }
 
     fun power() {
-        if (!hasIr) { key(26); return }
+        if (hasIr) { powerIr(); return }
+        if (connected && tvPowered != false) { key(26); return }
+        connect(wake = true)
+    }
+
+    fun powerIr() {
+        if (!hasIr) return
         action {
             val signal = powerSignal
             ir.transmit(signal.first, signal.second)
         }
-        connect()
     }
 
     fun startVoice() {
@@ -409,7 +455,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (!voiceRequested) {
-            message = "Открой голосовой поиск в приложении на ТВ — микрофон включится автоматически"
+            key(84) // SEARCH opens TV voice search; its request starts capture below.
             return
         }
         recording = true
