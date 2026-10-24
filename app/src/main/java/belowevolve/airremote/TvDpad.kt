@@ -16,75 +16,84 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun TvDpad(model: RemoteModel, modifier: Modifier = Modifier) {
     val haptic = LocalHapticFeedback.current
-    Box(modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer)
+    BoxWithConstraints(modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer)
         .border(TvLayout.DpadBorder, MaterialTheme.colorScheme.outlineVariant, CircleShape)
         .pointerInput(model.connected) {
             awaitEachGesture {
                 val down = awaitFirstDown(pass = PointerEventPass.Initial)
                 fun keyAt(x: Float, y: Float) = dpadKey(x - size.width / 2f, y - size.height / 2f,
                     size.width / 2f, TvLayout.ConfirmSize.toPx() / 2f)
-                var key = keyAt(down.position.x, down.position.y)
-                if (key == null) return@awaitEachGesture
+                val key = keyAt(down.position.x, down.position.y) ?: return@awaitEachGesture
                 down.consume()
+                val gesture = DpadGesture(key, down.position.x, down.position.y,
+                    viewConfiguration.touchSlop, maxOf(32.dp.toPx(), viewConfiguration.touchSlop * 2))
                 var heldOk = false
+                var repeated = false
                 var deadline = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
                 var now = down.uptimeMillis
-                fun pressArrow() {
-                    if (key != null && key != 23) model.key(key!!)
+                fun press(code: Int) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    model.key(code)
                 }
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                pressArrow()
                 try {
                     while (true) {
-                        val event = if (key == null || heldOk) awaitPointerEvent(PointerEventPass.Initial)
+                        val event = if (gesture.moving || heldOk) awaitPointerEvent(PointerEventPass.Initial)
                         else withTimeoutOrNull((deadline - now).coerceAtLeast(1)) {
                             awaitPointerEvent(PointerEventPass.Initial)
                         }
                         if (event == null) {
-                            if (key == 23) { model.holdOk(true); heldOk = true }
-                            else pressArrow()
+                            repeated = true
+                            if (key == 23) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                model.holdOk(true)
+                                heldOk = true
+                            } else press(key)
                             now = deadline
                             deadline += 80
                             continue
                         }
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                         now = change.uptimeMillis
-                        val next = keyAt(change.position.x, change.position.y)
                         event.changes.forEach { it.consume() }
-                        if (!change.pressed) {
-                            if (key == 23 && next == 23 && !heldOk) model.key(23)
-                            break
+                        // A second finger cancels this gesture instead of leaving OK held.
+                        if (event.changes.any { it.id != down.id && it.pressed }) break
+                        val swipe = gesture.move(change.position.x, change.position.y)
+                        if (gesture.moving && heldOk) {
+                            model.holdOk(false)
+                            heldOk = false
                         }
-                        if (next != key) {
-                            if (heldOk) { model.holdOk(false); heldOk = false }
-                            key = next
-                            deadline = now + viewConfiguration.longPressTimeoutMillis
-                            pressArrow()
+                        swipe?.let(::press)
+                        if (!change.pressed) {
+                            if (!repeated) gesture.tap()?.let(::press)
+                            break
                         }
                     }
                 } finally { if (heldOk) model.holdOk(false) }
             }
         }) {
+        // Centre each arrow in the ring between the OK button and outer edge.
+        val arrowInset = ((maxWidth - TvLayout.ConfirmSize) / 4 - RemoteLayout.ActionSize / 2)
+            .coerceAtLeast(0.dp)
         listOf(
             Triple(Icons.Rounded.KeyboardArrowUp, "Вверх", Alignment.TopCenter),
             Triple(Icons.Rounded.KeyboardArrowDown, "Вниз", Alignment.BottomCenter),
             Triple(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, "Влево", Alignment.CenterStart),
             Triple(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Вправо", Alignment.CenterEnd),
         ).forEachIndexed { index, (icon, label, alignment) ->
-            Box(Modifier.align(alignment).padding(TvLayout.DpadInset).size(RemoteLayout.ActionSize)
+            Box(Modifier.align(alignment).padding(arrowInset).size(RemoteLayout.ActionSize)
                 .semantics { onClick(label) { model.key(19 + index); true } }, contentAlignment = Alignment.Center) {
-                Icon(icon, label, Modifier.size(RemoteLayout.ActionIconSize), tint = Color(0xFFE0E5EC))
+                Icon(icon, label, Modifier.size(TvLayout.DirectionIconSize), tint = MaterialTheme.colorScheme.onSurface)
             }
         }
         Surface(Modifier.size(TvLayout.ConfirmSize).align(Alignment.Center)
