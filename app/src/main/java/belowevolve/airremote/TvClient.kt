@@ -12,7 +12,6 @@ import java.security.cert.X509Certificate
 import java.security.interfaces.RSAPublicKey
 import javax.net.ssl.SSLSocket
 import kotlinx.coroutines.*
-import kotlin.time.Duration.Companion.seconds
 import kotlin.coroutines.EmptyCoroutineContext
 
 private const val IME_TAG = "AirRemoteIme"
@@ -119,10 +118,7 @@ class TvClient(private val identity: TvIdentity) {
                         val field = msg.remoteImeShowRequest.remoteTextFieldStatus
                         Log.d(IME_TAG, "show field=${field.counterField} length=${field.value.length} selection=${field.start}:${field.end}")
                     }
-                    if (msg.hasRemoteImeBatchEdit()) {
-                        val batch = msg.remoteImeBatchEdit
-                        Log.d(IME_TAG, "batch ime=${batch.imeCounter} field=${batch.fieldCounter} edits=${batch.editInfoCount}")
-                    }
+
                 }
                 synchronized(writeLock) {
                     if (socket === s) {
@@ -206,8 +202,6 @@ class TvClient(private val identity: TvIdentity) {
             id
         } catch (e: Exception) { voice.end(id); throw e }
     }
-
-    fun hasVoiceRequest(): Boolean = synchronized(writeLock) { voice.requested != null }
 
     fun isVoiceActive(id: Int): Boolean = synchronized(writeLock) { voice.active == id }
 

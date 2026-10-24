@@ -2,17 +2,13 @@ package belowevolve.airremote
 
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
@@ -23,16 +19,19 @@ fun KeyboardScreen(model: RemoteModel) {
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         CaptureDialogVolumeKeys()
+        var editorView by remember { mutableStateOf<RemoteEditText?>(null) }
+        val submit = { editorView?.publishValue(); model.submitKeyboard() }
         val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
         val hintColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
         val inputType = model.keyboardInputType.takeIf { it != 0 } ?: android.text.InputType.TYPE_CLASS_TEXT
         val imeOptions = model.keyboardImeOptions.takeIf { (it and 0xff) != 0 } ?: EditorInfo.IME_ACTION_DONE
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(24.dp)) {
+            Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = RemoteLayout.ScreenPadding, vertical = RemoteLayout.SmallGap)) {
                 AndroidView(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     factory = { context ->
                         RemoteEditText(context).apply {
+                            editorView = this
                             background = null
                             setPadding(0, 0, 0, 0)
                             gravity = Gravity.TOP or Gravity.START
@@ -46,14 +45,10 @@ fun KeyboardScreen(model: RemoteModel) {
                             onValueChanged = model::editKeyboard
                             onBoundaryDelete = model::backspaceKeyboard
                             setOnEditorActionListener { _, _, event ->
-                                if (event == null || event.action == android.view.KeyEvent.ACTION_DOWN) model.submitKeyboard()
+                                if (event == null || event.action == android.view.KeyEvent.ACTION_DOWN) submit()
                                 true
                             }
                             applyValue(model.keyboardValue)
-                            post {
-                                requestFocus()
-                                context.getSystemService(InputMethodManager::class.java).showSoftInput(this, 0)
-                            }
                         }
                     }
                 ) { editor ->
@@ -64,10 +59,7 @@ fun KeyboardScreen(model: RemoteModel) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = model::hideKeyboard) { Text("Отмена") }
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = model::deleteKeyboardCharacter) {
-                        Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = "Удалить символ на ТВ")
-                    }
-                    TextButton(onClick = model::submitKeyboard) { Text("Ввод") }
+                    TextButton(onClick = submit) { Text("Ввод") }
                 }
             }
         }

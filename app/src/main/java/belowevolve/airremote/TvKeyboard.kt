@@ -64,12 +64,14 @@ class TvKeyboard {
                 changed = true
             }
         }
-        // Counter-only batch notifications carry no field snapshot. Do not invalidate
-        // queued typing or reuse their counters for outgoing compatibility edits.
+        // Server field 21 is a visibility notification, not an edit batch.
+        // Only the app-info ID and text snapshot revision identify an editor.
         if (message.hasRemoteImeShowRequest()) {
             val request = message.remoteImeShowRequest
+            // Field 22 is a text update, including delayed echoes of our own edits.
+            // Only discovering a new editor should open the phone keyboard.
+            show = !hasField
             if (request.hasRemoteTextFieldStatus()) accept(request.remoteTextFieldStatus)
-            show = true
             changed = true
         }
         return if (changed) snapshot(show) else null
@@ -105,6 +107,11 @@ class TvKeyboard {
         val batch = editBatch()
         if (normalized.text != value.text) {
             val change = difference(value.text, normalized.text)
+            // An empty composing region does not move the TV cursor. Select the
+            // replacement range explicitly, including insertion-only edits.
+            batch.addEditInfo(RemoteEditInfo.newBuilder().setSelection(
+                RemoteImeSelection.newBuilder().setStart(change.start).setEnd(change.end),
+            ))
             batch.addEditInfo(RemoteEditInfo.newBuilder().setTextFieldStatus(
                 RemoteImeObject.newBuilder().setStart(change.start).setEnd(change.end).setValue(change.text),
             ))
@@ -118,10 +125,10 @@ class TvKeyboard {
         return RemoteMessage.newBuilder().setRemoteImeBatchEdit(batch).build()
     }
 
-    // Use the service's zero-counter compatibility path for both edits and actions.
-    // On the tested TV, echoing its batch counters (1/1) silently drops active-field
-    // edits; zero counters apply immediately and produce authoritative text updates.
-    private fun editBatch() = RemoteImeBatchEdit.newBuilder().setImeCounter(0).setFieldCounter(0)
+    // Zero selects the service's key-event fallback: it ignores selection/actions.
+    // Use the editor ID from app_info and revision from text_field_status.
+    private fun editBatch() = RemoteImeBatchEdit.newBuilder()
+        .setImeCounter(contextCounter).setFieldCounter(textRevision.coerceAtLeast(0))
 
     private fun rememberEcho(text: KeyboardText) {
         if (echoes.lastOrNull() != text) echoes.addLast(text)
@@ -133,7 +140,7 @@ class TvKeyboard {
     fun submit(expectedEpoch: Long): RemoteMessage? {
         if (expectedEpoch != epoch) return null
         val action = imeOptions and 0xff
-        return if (hasField && action in 2..7) {
+        return if (hasField && contextCounter != 0 && action in 2..7) {
             RemoteMessage.newBuilder().setRemoteImeBatchEdit(
                 editBatch()
                     .addEditInfo(RemoteEditInfo.newBuilder().setEditorAction(RemoteImeAction.newBuilder().setAction(action))),

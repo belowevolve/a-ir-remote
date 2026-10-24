@@ -13,7 +13,7 @@ import android.widget.EditText
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 
-/** Keeps Backspace observable even when the TV has text that is absent locally. */
+/** Publishes complete native IME batches and preserves composition during Compose updates. */
 class RemoteEditText(context: Context) : EditText(context) {
     var onValueChanged: ((TextFieldValue) -> Unit)? = null
     var onBoundaryDelete: ((Int) -> Unit)? = null
@@ -23,6 +23,7 @@ class RemoteEditText(context: Context) : EditText(context) {
     private var pendingPublish = false
     private var lastPublished = TextFieldValue()
     private val publish = Runnable { publishValue() }
+    private val atEmptyBoundary get() = length() == 0 && selectionStart == 0 && selectionEnd == 0
 
     init {
         addTextChangedListener(object : TextWatcher {
@@ -45,7 +46,7 @@ class RemoteEditText(context: Context) : EditText(context) {
         if (batchDepth == 0) post(publish)
     }
 
-    private fun publishValue() {
+    fun publishValue() {
         removeCallbacks(publish)
         if (applyingRemoteValue) return
         if (batchDepth > 0) { pendingPublish = true; return }
@@ -112,7 +113,7 @@ class RemoteEditText(context: Context) : EditText(context) {
                 return super.performEditorAction(editorAction)
             }
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                if (beforeLength > 0 && afterLength == 0 && selectionStart == 0 && selectionEnd == 0) {
+                if (beforeLength > 0 && afterLength == 0 && atEmptyBoundary) {
                     publishValue()
                     onBoundaryDelete?.invoke(beforeLength)
                     return true
@@ -123,7 +124,7 @@ class RemoteEditText(context: Context) : EditText(context) {
             }
 
             override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
-                if (beforeLength > 0 && afterLength == 0 && selectionStart == 0 && selectionEnd == 0) {
+                if (beforeLength > 0 && afterLength == 0 && atEmptyBoundary) {
                     publishValue()
                     onBoundaryDelete?.invoke(beforeLength)
                     return true
@@ -134,7 +135,7 @@ class RemoteEditText(context: Context) : EditText(context) {
             }
 
             override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.keyCode == KeyEvent.KEYCODE_DEL && selectionStart == 0 && selectionEnd == 0) {
+                if (event.keyCode == KeyEvent.KEYCODE_DEL && atEmptyBoundary) {
                     if (event.action == KeyEvent.ACTION_DOWN) {
                         publishValue()
                         onBoundaryDelete?.invoke(1)
@@ -156,7 +157,7 @@ class RemoteEditText(context: Context) : EditText(context) {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_DEL && selectionStart == 0 && selectionEnd == 0) {
+        if (keyCode == KeyEvent.KEYCODE_DEL && atEmptyBoundary) {
             publishValue()
             onBoundaryDelete?.invoke(1)
             return true

@@ -26,19 +26,19 @@ class TvKeyboardTest {
         
         // Backspace: abc -> ab
         val edit = keyboard.edit(keyboard.snapshot().epoch, KeyboardText("ab"))!!
-        val status = edit.remoteImeBatchEdit.getEditInfo(0).textFieldStatus
+        val status = edit.remoteImeBatchEdit.getEditInfo(1).textFieldStatus
         assertEquals(2, status.start)
         assertEquals(3, status.end)
         assertEquals("", status.value)
     }
 
-    @Test fun contextCountersDoNotOverrideCompatibilityMode() {
+    @Test fun editsUseEditorIdAndTextRevision() {
         val keyboard = TvKeyboard()
         keyboard.receive(session("abc", counter = 10))
         val batch = keyboard.edit(keyboard.snapshot().epoch, KeyboardText("def"))!!.remoteImeBatchEdit
-        // Context and text revision are NOT command counters.
-        assertEquals(0, batch.imeCounter)
-        assertEquals(0, batch.fieldCounter)
+        // These identify the InputConnection and its current content.
+        assertEquals(10, batch.imeCounter)
+        assertEquals(4, batch.fieldCounter)
     }
 
     @Test fun resetClearsStateAndEpoch() {
@@ -57,12 +57,12 @@ class TvKeyboardTest {
             RemoteImeBatchEdit.newBuilder().setImeCounter(1).setFieldCounter(1),
         ).build())
         val batch = keyboard.submit(keyboard.snapshot().epoch)!!.remoteImeBatchEdit
-        assertEquals(0, batch.imeCounter)
-        assertEquals(0, batch.fieldCounter)
+        assertEquals(7, batch.imeCounter)
+        assertEquals(4, batch.fieldCounter)
         val action = keyboard.submit(keyboard.snapshot().epoch)!!.remoteImeBatchEdit.getEditInfo(0)
         assertEquals(3, action.editorAction.action)
     }
-    @Test fun realTvTraceUsesCompatibilityEditsDespiteNonzeroNotificationCounters() {
+    @Test fun visibilityNotificationDoesNotReplaceEditorRevision() {
         val keyboard = TvKeyboard()
         keyboard.receive(RemoteMessage.newBuilder().setRemoteImeKeyInject(
             RemoteImeKeyInject.newBuilder().setAppInfo(RemoteAppInfo.newBuilder().setCounter(1))
@@ -75,10 +75,10 @@ class TvKeyboardTest {
             RemoteImeShowRequest.newBuilder().setRemoteTextFieldStatus(field("old", counter = 245)),
         ).build())
         val message = keyboard.edit(keyboard.snapshot().epoch, KeyboardText("oldX"))!!
-        assertEquals(0, message.remoteImeBatchEdit.imeCounter)
-        assertEquals(0, message.remoteImeBatchEdit.fieldCounter)
-        assertEquals("X", message.remoteImeBatchEdit.getEditInfo(0).textFieldStatus.value)
-        assertEquals(3, message.remoteImeBatchEdit.getEditInfo(0).textFieldStatus.start)
+        assertEquals(1, message.remoteImeBatchEdit.imeCounter)
+        assertEquals(245, message.remoteImeBatchEdit.fieldCounter)
+        assertEquals("X", message.remoteImeBatchEdit.getEditInfo(1).textFieldStatus.value)
+        assertEquals(3, message.remoteImeBatchEdit.getEditInfo(1).textFieldStatus.start)
     }
 
     @Test fun counterAcknowledgementDoesNotInvalidateQueuedTyping() {
@@ -125,6 +125,17 @@ class TvKeyboardTest {
         assertEquals("ab", keyboard.snapshot().value.text)
         assertEquals(2L, keyboard.snapshot().revision)
         assertEquals(epoch, keyboard.snapshot().epoch)
+    }
+
+    @Test fun textUpdatesDoNotReopenSubmittedEditorButNextFieldDoes() {
+        val keyboard = TvKeyboard()
+        keyboard.receive(session("first"))
+        keyboard.submit(keyboard.snapshot().epoch)
+        val echo = keyboard.receive(RemoteMessage.newBuilder().setRemoteImeShowRequest(
+            RemoteImeShowRequest.newBuilder().setRemoteTextFieldStatus(field("first", counter = 5)),
+        ).build())!!
+        assertFalse(echo.show)
+        assertTrue(keyboard.receive(session("second", counter = 8))!!.show)
     }
 
 }

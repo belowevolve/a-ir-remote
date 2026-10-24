@@ -56,7 +56,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private var keyboardRevision = 0L
     private var connectionGeneration = 0L
 
-    private data class TvCommand(val generation: Long, val epoch: Long, val value: KeyboardText?, val backspaces: Int = 0, val revision: Long = 0, val action: (TvClient.() -> Unit)? = null)
+    private data class TvCommand(val generation: Long, val action: TvClient.() -> Unit)
     private val commands = Channel<TvCommand>(Channel.UNLIMITED)
 
     val devices = mutableStateListOf<Pair<String, String>>()
@@ -93,10 +93,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 if (!connected || (command.generation != connectionGeneration)) continue
                 try {
                     withContext(Dispatchers.IO) {
-                        if (command.action != null) command.action.invoke(client)
-                        else if (command.backspaces > 0) client.backspaceKeyboard(command.epoch, command.backspaces)
-                        else if (command.value == null) client.submitKeyboard(command.epoch)
-                        else client.editKeyboard(command.epoch, command.revision, command.value)
+                        command.action(client)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -109,7 +106,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun resetKeyboard() {
+    private fun resetConnectionState() {
         connectionGeneration++
         voiceRequested = false
         stopVoice()
@@ -160,32 +157,22 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (previous.text == value.text && previous.selection == value.selection) return
         keyboardRevision++
         
-        commands.trySend(
-            TvCommand(
-                connectionGeneration,
-                keyboardEpoch,
-                KeyboardText(value.text, value.selection.start, value.selection.end),
-                revision = keyboardRevision,
-            )
-        )
+        val epoch = keyboardEpoch
+        val revision = keyboardRevision
+        val text = KeyboardText(value.text, value.selection.start, value.selection.end)
+        enqueue { editKeyboard(epoch, revision, text) }
     }
 
     fun backspaceKeyboard(count: Int = 1) {
-        if (!connected || count <= 0) return
-        commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null, count))
-    }
-
-    fun deleteKeyboardCharacter() {
-        val value = keyboardValue
-        val end = value.selection.max
-        val start = if (value.selection.collapsed && end > 0) value.text.offsetByCodePoints(end, -1) else value.selection.min
-        if (start == end) backspaceKeyboard()
-        else editKeyboard(TextFieldValue(value.text.removeRange(start, end), TextRange(start)))
+        if (count <= 0) return
+        val epoch = keyboardEpoch
+        enqueue { backspaceKeyboard(epoch, count) }
     }
 
     fun submitKeyboard() {
-        if (!connected) return
-        commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null))
+        val epoch = keyboardEpoch
+        enqueue { submitKeyboard(epoch) }
+        hideKeyboard()
     }
 
     fun resume() {
@@ -196,8 +183,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun pause() {
         foreground = false
-        resetKeyboard()
-        stopVoice()
+        resetConnectionState()
         connectionJob?.cancel()
         connectionJob = null
         if (initialized) client.close()
@@ -207,15 +193,23 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun discover() {
         if (discovery != null) return
+        devices.clear()
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(type: String) = Unit
             override fun onDiscoveryStopped(type: String) = Unit
             override fun onStartDiscoveryFailed(type: String, code: Int) {
-                discovery = null
+                val owner = this
+                viewModelScope.launch { if (discovery === owner) discovery = null }
             }
             override fun onStopDiscoveryFailed(type: String, code: Int) = Unit
-            override fun onServiceLost(service: NsdServiceInfo) = Unit
+            override fun onServiceLost(service: NsdServiceInfo) {
+                val owner = this
+                viewModelScope.launch {
+                    if (discovery === owner) devices.removeAll { it.first == service.serviceName }
+                }
+            }
             override fun onServiceFound(service: NsdServiceInfo) {
+                val owner = this
                 @Suppress("DEPRECATION")
                 nsd.resolveService(
                     service,
@@ -224,7 +218,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                         override fun onServiceResolved(info: NsdServiceInfo) {
                             val address = info.host?.hostAddress ?: return
                             viewModelScope.launch {
-                                if (devices.none { it.second == address }) {
+                                if (discovery === owner && devices.none { it.second == address }) {
                                     devices.add(info.serviceName to address)
                                 }
                             }
@@ -271,7 +265,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         connectionJob?.cancel()
         client.close()
         connected = false
-        resetKeyboard()
+        resetConnectionState()
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { client.beginPairing(targetHost) }
@@ -357,7 +351,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                     if (e is CancellationException) throw e
                     Log.w("AirRemote", "TV disconnected", e)
                     connected = false
-                    resetKeyboard()
+                    resetConnectionState()
                     status = "ТВ недоступен · ИК работает отдельно"
                 }
                 delay(3.seconds)
@@ -367,7 +361,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     // All user commands share one FIFO, including keyboard edits and held-key edges.
     private fun enqueue(action: TvClient.() -> Unit) {
-        if (connected) commands.trySend(TvCommand(connectionGeneration, keyboardEpoch, null, action = action))
+        if (connected) commands.trySend(TvCommand(connectionGeneration, action))
     }
 
     fun holdOk(pressed: Boolean) {
@@ -443,8 +437,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон не готов" }
                 input.startRecording()
                 val buffer = ByteArray(8 * 1024)
-                val deadline = System.currentTimeMillis() + 30000
-                while (currentCoroutineContext().isActive && client.isVoiceActive(id) && System.currentTimeMillis() < deadline) {
+                val deadline = android.os.SystemClock.elapsedRealtime() + 30000
+                while (currentCoroutineContext().isActive && client.isVoiceActive(id) && android.os.SystemClock.elapsedRealtime() < deadline) {
                     val count = input.read(buffer, 0, buffer.size)
                     check(count > 0) { "Ошибка записи микрофона: $count" }
                     client.audio(id, buffer.copyOf(count))
@@ -467,5 +461,3 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (initialized) client.cancelPairing()
     }
 }
-
-/** Portable format: carrier frequency in Hz followed by alternating on/off durations in µs. */
