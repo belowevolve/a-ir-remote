@@ -28,3 +28,24 @@
 Пакет уменьшен с 20 до 8 КиБ (512 мс при 8 кГц PCM16); искусственная тишина
 к каждому короткому чтению не добавляется. Совместимость запросов конкретного
 приложения и распознавание речи требуют проверки на ТВ.
+
+## Клавиатура и ПК
+
+На RMX5061 выполнен `InputRegressionRunner`: реальный InputConnection с вложенными
+batch edits, выбором подсказки, заменой выделенного слова и composing spans.
+Проверен также постоянный уникальный сертификат Android Keystore. Все проверки прошли.
+
+Повторный запуск:
+
+```sh
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+adb -s PHONE install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s PHONE install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s PHONE shell am instrument -w belowevolve.airremote.dev.test/belowevolve.airremote.InputRegressionRunner
+```
+
+На Windows осталось проверить: возвращение после случайного разрыва Bluetooth,
+отсутствие автоподключения после ручного отключения, Shift RU/EN, индикатор Caps
+Lock, перенос пальца при выделении области скриншота и немедленное отпускание
+кнопки при выходе с экрана трекпада. Android может снимать регистрацию HID в фоне;
+повторы в активном приложении не гарантируют сохранение фонового соединения.
