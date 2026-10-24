@@ -30,8 +30,6 @@ private val numpadRows = listOf(
     listOf("Esc" to 41, "Tab" to 43, "Menu" to 101, "1" to 89, "2" to 90, "3" to 91, "Enter" to 88),
     listOf("Shift" to -2, "Space" to 44, "0" to 98, "." to 99, "Enter" to 88),
 )
-private const val latin = "`qwertyuiop[]asdfghjkl;'zxcvbnm,."
-private const val cyrillic = "ёйцукенгшщзхъфывапролджэячсмитьбю"
 
 @Composable
 internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = KeyboardLayout.KeyHeight, numpad: Boolean = false, toolbar: @Composable () -> Unit = {}) {

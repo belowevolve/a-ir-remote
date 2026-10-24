@@ -105,18 +105,21 @@ class PcHidOutputTest {
         } finally { unblock.countDown(); output.close() }
     }
 
-    @Test fun standaloneWindowsSendsModifierThenReleasesIt() {
+    @Test fun windowsKeyAndLanguageChordReleaseAllKeys() {
         val reports = Collections.synchronizedList(mutableListOf<ByteArray>())
-        val sent = CountDownLatch(2)
+        val sent = CountDownLatch(4)
         val output = PcHidOutput { id, bytes ->
             if (id == PcHidReports.KEYBOARD) { reports.add(bytes); sent.countDown() }
         }
         try {
             output.key(0, 8)
+            output.key(44, 8)
             assertTrue(sent.await(2, TimeUnit.SECONDS))
             assertEquals(8, reports[0][0].toInt())
             assertTrue(reports[0].drop(1).all { it == 0.toByte() })
             assertTrue(reports[1].all { it == 0.toByte() })
+            assertArrayEquals(byteArrayOf(8, 0, 44, 0, 0, 0, 0, 0), reports[2])
+            assertTrue(reports[3].all { it == 0.toByte() })
         } finally { output.close() }
     }
 

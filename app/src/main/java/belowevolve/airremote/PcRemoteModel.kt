@@ -52,12 +52,20 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     var modifiers by mutableIntStateOf(0)
         private set
     private val prefs = application.getSharedPreferences("pc_remote", Context.MODE_PRIVATE)
+    var russianLayout by mutableStateOf(prefs.getBoolean("russian_layout", false))
+        private set
+
+    fun toggleKeyboardLayout() {
+        russianLayout = !russianLayout
+        prefs.edit { putBoolean("russian_layout", russianLayout) }
+    }
+
     private val selection = PcHostSelection(prefs.getString("host", null), prefs.getBoolean("auto_connect", true))
-    var sensitivity by mutableFloatStateOf(prefs.getFloat("sensitivity", 1.6f))
+    var sensitivity by mutableFloatStateOf(PcPointerSensitivity.normalize(prefs.getFloat("sensitivity", 1.6f)))
         private set
 
     fun updateSensitivity(value: Float) {
-        sensitivity = value.coerceIn(0.6f, 3.0f)
+        sensitivity = PcPointerSensitivity.normalize(value)
         prefs.edit { putFloat("sensitivity", sensitivity) }
     }
 
@@ -333,16 +341,28 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         selection.pair()
         prefs.edit { remove("host"); putBoolean("auto_connect", true) }
     }
+    private fun sendKey(code: Int, modifiers: Int): Boolean {
+        if (!connected) return false
+        val queued = output?.key(code, modifiers) == true
+        if (!queued) status = "Bluetooth не успевает отправлять. Переподключи ПК"
+        return queued
+    }
+
     fun key(code: Int) {
-        if (!connected) return
-        if (output?.key(code, modifiers) != true) status = "Bluetooth не успевает отправлять. Переподключи ПК"
+        sendKey(code, modifiers)
         modifiers = 0
     }
+
     fun windowsKey() {
-        if (!connected) return
-        if (output?.key(0, 8) != true) status = "Bluetooth не успевает отправлять. Переподключи ПК"
+        sendKey(0, 8)
         modifiers = 0
     }
+
+    // Send Win + Space as one chord, independent of sticky keyboard modifiers.
+    fun switchLanguage() {
+        if (sendKey(44, 8)) toggleKeyboardLayout()
+    }
+
     fun toggleModifier(mask: Int) { if (connected) modifiers = modifiers xor mask }
     fun volume(direction: Int) {
         if (connected && output?.consumer(direction) != true) status = "Bluetooth не успевает отправлять. Переподключи ПК"
