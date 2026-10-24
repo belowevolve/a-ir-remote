@@ -14,9 +14,17 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun Trackpad(model: PcRemoteModel, modifier: Modifier = Modifier) {
+    val scope = rememberCoroutineScope()
+    var releaseJob by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(model) {
+        onDispose { releaseJob?.cancel(); model.dragButton(pressed = false) }
+    }
     Box(
         modifier = modifier.fillMaxWidth()
             .clip(KeyboardLayout.TrackpadShape)
@@ -26,13 +34,17 @@ internal fun Trackpad(model: PcRemoteModel, modifier: Modifier = Modifier) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     down.consume()
+                    val continuingDrag = model.dragging
+                    releaseJob?.cancel()
+                    releaseJob = null
+                    var releasedNormally = false
                     var travel = 0f
                     var fingers = 1
                     var remainderX = 0f
                     var remainderY = 0f
                     var scroll = 0f
                     var elapsed = 0L
-                    var held = false
+                    var held = continuingDrag
                     val origins = mutableMapOf(down.id to down.position)
                     try {
                         do {
@@ -72,12 +84,22 @@ internal fun Trackpad(model: PcRemoteModel, modifier: Modifier = Modifier) {
                                 }
                             }
                             event.changes.forEach { it.consume() }
-                            if (event.changes.none { it.pressed }) break
+                            if (event.changes.none { it.pressed }) { releasedNormally = true; break }
                         } while (true)
-                        if ((travel < viewConfiguration.touchSlop) && (elapsed < viewConfiguration.longPressTimeoutMillis) && !held)
-                            model.click(right = fingers > 1)
+                        val tap = travel < viewConfiguration.touchSlop && elapsed < viewConfiguration.longPressTimeoutMillis
+                        if (tap && continuingDrag) model.dragButton(pressed = false)
+                        else if (tap && !held) model.click(right = fingers > 1)
                     } finally {
-                        if (model.dragging) model.dragButton(pressed = false)
+                        if (model.dragging) {
+                            if (releasedNormally && fingers == 1) {
+                                // A short lift lets the finger return from the edge without
+                                // dropping a selection. A tap completes the drag immediately.
+                                releaseJob = scope.launch {
+                                    delay(650)
+                                    model.dragButton(pressed = false)
+                                }
+                            } else model.dragButton(pressed = false)
+                        }
                     }
                 }
             },
