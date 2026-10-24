@@ -4,6 +4,7 @@ import android.content.Context
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.KeyEvent
+import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
@@ -18,6 +19,9 @@ class RemoteEditText(context: Context) : EditText(context) {
     var onBoundaryDelete: ((Int) -> Unit)? = null
     private var applyingRemoteValue = false
     private var requestedKeyboard = false
+    private var batchDepth = 0
+    private var pendingPublish = false
+    private var lastPublished = TextFieldValue()
     private val publish = Runnable { publishValue() }
 
     init {
@@ -36,33 +40,61 @@ class RemoteEditText(context: Context) : EditText(context) {
 
     private fun schedulePublish() {
         if (applyingRemoteValue) return
+        pendingPublish = true
         removeCallbacks(publish)
-        post(publish)
+        if (batchDepth == 0) post(publish)
     }
 
     private fun publishValue() {
         removeCallbacks(publish)
         if (applyingRemoteValue) return
+        if (batchDepth > 0) { pendingPublish = true; return }
+        pendingPublish = false
         val content = text?.toString().orEmpty()
-        onValueChanged?.invoke(TextFieldValue(content, TextRange(
+        val composingStart = BaseInputConnection.getComposingSpanStart(text)
+        val composingEnd = BaseInputConnection.getComposingSpanEnd(text)
+        lastPublished = TextFieldValue(content, TextRange(
             selectionStart.coerceIn(0, content.length), selectionEnd.coerceIn(0, content.length),
-        )))
+        ), if (composingStart >= 0 && composingEnd >= 0) TextRange(composingStart, composingEnd) else null)
+        onValueChanged?.invoke(lastPublished)
     }
 
     fun applyValue(value: TextFieldValue) {
+        // Compose can reapply its previous snapshot between IME callbacks. Never
+        // overwrite an in-progress suggestion/batch with that stale snapshot.
+        if ((pendingPublish || batchDepth > 0) && value.text == lastPublished.text && value.selection == lastPublished.selection) return
         if (text.toString() == value.text && selectionStart == value.selection.start && selectionEnd == value.selection.end) return
         applyingRemoteValue = true
         try {
-            if (text.toString() != value.text) setText(value.text)
+            if (text.toString() != value.text) {
+                text?.replace(0, length(), value.text)
+                BaseInputConnection.removeComposingSpans(text)
+            }
             setSelection(value.selection.start.coerceIn(0, length()), value.selection.end.coerceIn(0, length()))
         } finally {
             applyingRemoteValue = false
+            lastPublished = value
         }
     }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val connection = super.onCreateInputConnection(outAttrs) ?: return null
         return object : InputConnectionWrapper(connection, false) {
+            override fun beginBatchEdit(): Boolean {
+                batchDepth++
+                return super.beginBatchEdit()
+            }
+            override fun endBatchEdit(): Boolean {
+                val result = super.endBatchEdit()
+                batchDepth = (batchDepth - 1).coerceAtLeast(0)
+                if (batchDepth == 0 && pendingPublish) publishValue()
+                return result
+            }
+            override fun finishComposingText(): Boolean {
+                val result = super.finishComposingText()
+                publishValue()
+                return result
+            }
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 val result = super.commitText(text, newCursorPosition)
                 publishValue()
