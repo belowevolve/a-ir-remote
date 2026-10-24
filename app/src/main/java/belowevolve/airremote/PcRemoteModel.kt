@@ -14,6 +14,10 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @SuppressLint("MissingPermission") // Every entry point checks runtime permission; revocation is caught as well.
 class PcRemoteModel(application: Application) : AndroidViewModel(application) {
@@ -29,6 +33,10 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     private var pendingHost: BluetoothDevice? = null
     private var disconnectingHost: BluetoothDevice? = null
     private var output: PcHidOutput? = null
+    private var reconnectJob: Job? = null
+    private var keyboardLeds = 0
+    var capsLock by mutableStateOf(false)
+        private set
     var registered by mutableStateOf(value = false)
         private set
     var connected by mutableStateOf(false)
@@ -78,6 +86,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 modifiers = 0
                 dragging = false
                 status = "HID отключён. Нажми «Подключить», чтобы повторить"
+                scheduleReconnect()
             } else if (!foreground || !enabled) {
                 safely { hid?.unregisterApp() }
             } else {
@@ -114,6 +123,9 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                     host = device
                     deviceName = device.name ?: "Компьютер"
                     connected = true
+                    reconnectJob?.cancel()
+                    keyboardLeds = 0
+                    capsLock = false
                     status = "${device.name ?: "Компьютер"} · подключён"
                     prefs.edit { putString("host", device.address) }
                     releaseInputs()
@@ -137,6 +149,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                         val next = pendingHost
                         pendingHost = null
                         if (next != null && selection.accepts(next.address)) connect(next)
+                        else scheduleReconnect()
                     }
                 }
             }
@@ -151,7 +164,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                     else -> null
                 }
                 BluetoothHidDevice.REPORT_TYPE_OUTPUT -> when (id.toInt()) {
-                    PcHidReports.KEYBOARD -> byteArrayOf(0)
+                    PcHidReports.KEYBOARD -> byteArrayOf(keyboardLeds.toByte())
                     else -> null
                 }
                 else -> null
@@ -160,15 +173,47 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             else hid?.reportError(device, BluetoothHidDevice.ERROR_RSP_INVALID_RPT_ID)
         }
 
+        override fun onInterruptData(device: BluetoothDevice, reportId: Byte, data: ByteArray) {
+            if (reportId.toInt() == PcHidReports.KEYBOARD) updateKeyboardLeds(device, data)
+        }
+
         override fun onSetReport(device: BluetoothDevice, type: Byte, id: Byte, data: ByteArray) = safely {
             hid?.reportError(
                 device,
                 if (type == BluetoothHidDevice.REPORT_TYPE_OUTPUT && id.toInt() == PcHidReports.KEYBOARD) {
+                    updateKeyboardLeds(device, data)
                     BluetoothHidDevice.ERROR_RSP_SUCCESS
                 } else {
                     BluetoothHidDevice.ERROR_RSP_UNSUPPORTED_REQ
                 },
             )
+        }
+    }
+
+    private fun updateKeyboardLeds(device: BluetoothDevice, data: ByteArray) {
+        if (device != host || data.isEmpty()) return
+        keyboardLeds = data[0].toInt() and 31
+        capsLock = keyboardLeds and 2 != 0
+    }
+
+    private fun scheduleReconnect() {
+        if (reconnectJob?.isActive == true || !foreground || !enabled || !selection.allowed || connected) return
+        reconnectJob = viewModelScope.launch {
+            for (wait in listOf(500L, 1000L, 2000L, 4000L, 8000L)) {
+                delay(wait)
+                if (!foreground || !enabled || !selection.allowed || connected || closed) break
+                safely {
+                    if (!hasPermission() || adapter?.isEnabled != true) return@safely
+                    if (!registered) start()
+                    else if (disconnectingHost == null) {
+                        val target = devices.firstOrNull { it.address == selection.address }
+                        if (target != null && hid?.getConnectionState(target) == BluetoothProfile.STATE_DISCONNECTED) {
+                            host = null
+                            connect(target)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -205,10 +250,10 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         else context.registerReceiver(receiver, filter)
     }
 
-    fun resume() { foreground = true; if (enabled) start() }
-    fun pause() { releaseInputs(); foreground = false }
-    fun activate() { enabled = true; start() }
-    fun deactivate() { releaseInputs(); enabled = false }
+    fun resume() { foreground = true; if (enabled) { start(); scheduleReconnect() } }
+    fun pause() { releaseInputs(); foreground = false; reconnectJob?.cancel() }
+    fun activate() { enabled = true; start(); scheduleReconnect() }
+    fun deactivate() { releaseInputs(); enabled = false; reconnectJob?.cancel() }
     fun permissionDenied() { status = "Для управления ПК разреши доступ к устройствам поблизости" }
     fun start(): Unit = safely {
         if (!hasPermission()) { permissionDenied(); return@safely }
@@ -269,6 +314,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         } else status = "Подключение не удалось. Проверь Bluetooth на ПК и повтори"
     }
     fun disconnect() = safely {
+        reconnectJob?.cancel()
         selection.disconnect()
         pendingHost = null
         prefs.edit { putBoolean("auto_connect", false) }

@@ -40,12 +40,11 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
             (if (numpad) numpadRows else keyboardRows).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
                     row.forEach { (label, code) ->
-                        val index = if (label.length == 1) latin.indexOf(label) else -1
                         PcKey(
-                            label = if (!numpad && russian && (index >= 0)) cyrillic[index].toString() else label,
+                            label = if (numpad) label else pcKeyLabel(label, russian, (model.modifiers and 2) != 0, model.capsLock),
                             modifier = Modifier.weight(if (numpad) { if (code == 44 || code == 98) 2f else 1f } else if (label.length > 1 && label !in listOf("Esc", "Del") && !label.startsWith("F")) 1.3f else 1f),
                             enabled = model.connected,
-                            selected = (code == -2) && ((model.modifiers and 2) != 0),
+                            selected = ((code == -2) && ((model.modifiers and 2) != 0)) || (code == 57 && model.capsLock),
                             repeatOnHold = code in listOf(42, 75, 76, 78),
                         ) {
                             if (code == -2) model.toggleModifier(2) else model.key(code)
