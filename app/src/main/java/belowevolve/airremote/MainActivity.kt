@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             RemoteTheme {
                 CompositionLocalProvider(LocalVolumeKeyHandler provides ::handleVolumeKey) {
-                    RemoteModes(pcModel, onPcActivated = { model.stopVoice(); model.hideKeyboard() }, onModeChanged = { pcMode = it }) {
+                    RemoteModes(pcModel, onPcActivated = { model.stopVoice(); model.hideKeyboard() }, onModeChanged = { pcMode = it; model.setTvMode(!it) }) {
                         RemoteScreen(model) {
                             if (model.recording) model.stopVoice() else microphone.launch(Manifest.permission.RECORD_AUDIO)
                         }
@@ -64,11 +64,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        model.onMicrophonePermissionNeeded = { microphone.launch(Manifest.permission.RECORD_AUDIO) }
         model.resume()
         pcModel.resume()
     }
 
     override fun onStop() {
+        model.onMicrophonePermissionNeeded = null
         model.pause()
         pcModel.pause()
         super.onStop()

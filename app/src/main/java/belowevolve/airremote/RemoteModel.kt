@@ -1,6 +1,8 @@
 package belowevolve.airremote
 
 import android.app.Application
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.Context
 import android.hardware.ConsumerIrManager
 import android.media.AudioFormat
@@ -76,6 +78,13 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private val nsd = app.getSystemService(NsdManager::class.java)
     private var discovery: NsdManager.DiscoveryListener? = null
     private var foreground = false
+    private var tvMode = true
+    var onMicrophonePermissionNeeded: (() -> Unit)? = null
+
+    fun setTvMode(enabled: Boolean) {
+        tvMode = enabled
+        if (!enabled) stopVoice()
+    }
     private var initialized = false
 
     init {
@@ -321,11 +330,18 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                             viewModelScope.launch {
                                 if (foreground && generation == connectionGeneration) {
                                     voiceRequested = requested
-                                    if (requested && !recording) {
-                                        keyboardVisible = false
-                                        message = "ТВ ждёт голос. Нажми «Говорить» на пульте"
-                                    }
                                     if (!requested) stopVoice()
+                                    else if (tvMode) {
+                                        keyboardVisible = false
+                                        // A new TV session replaces any previous recorder. Wait
+                                        // for its cleanup before opening the microphone again.
+                                        stopVoice()
+                                        voiceJob?.join()
+                                        if (foreground && tvMode && generation == connectionGeneration && voiceRequested) {
+                                            if (getApplication<Application>().checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startVoice()
+                                            else onMicrophonePermissionNeeded?.invoke()
+                                        }
+                                    }
                                 }
                             }
                         }) {
@@ -389,16 +405,21 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startVoice() {
-        if (voiceJob?.isActive == true) return
+        if (!foreground || !tvMode || voiceJob?.isActive == true) return
+        if (MicrophoneService.status.value.active) {
+            message = "Сначала останови микрофон для ПК"
+            return
+        }
         if (!connected) {
             message = "Сначала подключите ТВ"
             return
         }
         if (!voiceRequested) {
-            message = "Открой голосовой поиск в приложении на ТВ, затем нажми «Голос»"
+            message = "Открой голосовой поиск в приложении на ТВ — микрофон включится автоматически"
             return
         }
         recording = true
+        voiceRequested = false
         voiceJob = action {
             var recorder: AudioRecord? = null
             var id: Int? = null
@@ -431,8 +452,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 recorder?.let { runCatching { it.stop() }; it.release() }
                 id?.let { runCatching { client.endVoice(it) } }
-                val pending = client.hasVoiceRequest()
-                withContext(NonCancellable + Dispatchers.Main) { recording = false; voiceRequested = pending && connected }
+                // Do not overwrite a newer request while the previous session exits.
+                withContext(NonCancellable + Dispatchers.Main) { recording = false }
             }
         }
     }

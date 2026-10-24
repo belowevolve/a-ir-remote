@@ -14,7 +14,7 @@ internal class TvVoiceSession {
     }
     fun begin(): Int {
         check(active == null) { "Микрофон уже включён" }
-        val id = requested ?: error("Открой голосовой поиск в приложении на ТВ, затем нажми «Голос»")
+        val id = requested ?: error("Открой голосовой поиск в приложении на ТВ")
         requested = null
         active = id
         return id
