@@ -24,6 +24,7 @@ fun KeyboardScreen(model: RemoteModel) {
         onDismissRequest = model::hideKeyboard,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        CaptureDialogVolumeKeys()
         val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
         val hintColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
         val inputType = model.keyboardInputType.takeIf { it != 0 } ?: android.text.InputType.TYPE_CLASS_TEXT

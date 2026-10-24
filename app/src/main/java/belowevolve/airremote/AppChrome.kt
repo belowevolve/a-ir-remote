@@ -82,6 +82,7 @@ internal fun RemoteDialog(
     dismissButton: (@Composable () -> Unit)? = null,
 ) {
     Dialog(onDismissRequest, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        CaptureDialogVolumeKeys()
         Surface(
             modifier = Modifier.padding(horizontal = RemoteLayout.ScreenPadding, vertical = RemoteLayout.DialogInset).widthIn(max = RemoteLayout.DialogMaxWidth).fillMaxWidth(),
             shape = RemoteLayout.DialogShape,

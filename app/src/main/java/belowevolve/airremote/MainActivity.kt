@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.viewModels
 
 class MainActivity : ComponentActivity() {
@@ -30,9 +31,11 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             RemoteTheme {
-                RemoteModes(pcModel, onPcActivated = { model.stopVoice(); model.hideKeyboard() }, onModeChanged = { pcMode = it }) {
-                    RemoteScreen(model) {
-                        if (model.recording) model.stopVoice() else microphone.launch(Manifest.permission.RECORD_AUDIO)
+                CompositionLocalProvider(LocalVolumeKeyHandler provides ::handleVolumeKey) {
+                    RemoteModes(pcModel, onPcActivated = { model.stopVoice(); model.hideKeyboard() }, onModeChanged = { pcMode = it }) {
+                        RemoteScreen(model) {
+                            if (model.recording) model.stopVoice() else microphone.launch(Manifest.permission.RECORD_AUDIO)
+                        }
                     }
                 }
             }
@@ -40,24 +43,23 @@ class MainActivity : ComponentActivity() {
     }
 
     @SuppressLint("RestrictedApi")
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if ((event.action == KeyEvent.ACTION_DOWN) && (event.repeatCount == 0)) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_VOLUME_UP -> {
-                    if (pcMode) pcModel.volume(1) else model.key(24)
-                    return true
-                }
-                KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    if (pcMode) pcModel.volume(2) else model.key(25)
-                    return true
-                }
-                KeyEvent.KEYCODE_VOLUME_MUTE -> {
-                    if (pcMode) pcModel.volume(3) else model.key(164)
-                    return true
-                }
-            }
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        handleVolumeKey(event) || super.dispatchKeyEvent(event)
+
+    private fun handleVolumeKey(event: KeyEvent): Boolean {
+        val direction = when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> 1
+            KeyEvent.KEYCODE_VOLUME_DOWN -> 2
+            KeyEvent.KEYCODE_VOLUME_MUTE -> 3
+            else -> return false
         }
-        return super.dispatchKeyEvent(event)
+        // Consume the entire gesture, including repeats and key-up. Otherwise
+        // Android changes the phone volume after the initial remote command.
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (direction != 3 || event.repeatCount == 0) && !event.isCanceled) {
+            if (pcMode) pcModel.volume(direction) else model.key(event.keyCode)
+        }
+        return true
     }
 
     override fun onStart() {

@@ -172,6 +172,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         RemoteButton(
                             icon = Icons.Rounded.KeyboardArrowUp,
                             label = "Вверх",
+                            repeatOnHold = true,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .padding(top = TvLayout.DpadInset)
@@ -183,6 +184,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         RemoteButton(
                             icon = Icons.Rounded.KeyboardArrowDown,
                             label = "Вниз",
+                            repeatOnHold = true,
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .padding(bottom = TvLayout.DpadInset)
@@ -194,6 +196,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         RemoteButton(
                             icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
                             label = "Влево",
+                            repeatOnHold = true,
                             modifier = Modifier
                                 .align(Alignment.CenterStart)
                                 .padding(start = TvLayout.DpadInset)
@@ -205,6 +208,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         RemoteButton(
                             icon = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                             label = "Вправо",
+                            repeatOnHold = true,
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
                                 .padding(end = TvLayout.DpadInset)
@@ -273,9 +277,9 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
                 ) {
                     RemoteButton(Icons.Rounded.SkipPrevious, "Предыдущий", Modifier.weight(1f)) { model.key(88) }
-                    RemoteButton(Icons.Rounded.FastRewind, "Перемотка назад", Modifier.weight(1f)) { model.key(89) }
+                    RemoteButton(Icons.Rounded.FastRewind, "Перемотка назад", Modifier.weight(1f), repeatOnHold = true) { model.key(89) }
                     RemoteButton(Icons.Rounded.PlayArrow, "Пауза / воспроизведение", Modifier.weight(1f)) { model.key(85) }
-                    RemoteButton(Icons.Rounded.FastForward, "Перемотка вперёд", Modifier.weight(1f)) { model.key(90) }
+                    RemoteButton(Icons.Rounded.FastForward, "Перемотка вперёд", Modifier.weight(1f), repeatOnHold = true) { model.key(90) }
                     RemoteButton(Icons.Rounded.SkipNext, "Следующий", Modifier.weight(1f)) { model.key(87) }
                 }
 

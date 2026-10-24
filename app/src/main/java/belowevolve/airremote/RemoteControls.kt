@@ -63,6 +63,7 @@ internal fun RemoteButton(
     background: Color = MaterialTheme.colorScheme.surfaceContainer,
     tint: Color = Color(0xFFE0E5EC),
     onHold: ((Boolean) -> Unit)? = null,
+    repeatOnHold: Boolean = false,
     onClick: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -70,21 +71,31 @@ internal fun RemoteButton(
     val hold by rememberUpdatedState(onHold)
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "button press")
-    val input = if (onHold == null) Modifier.combinedClickable(
+    val input = if (onHold == null && !repeatOnHold) Modifier.combinedClickable(
         onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); click() },
-    ) else Modifier.semantics { onClick(label) { click(); true } }.pointerInput(Unit) {
+    ) else Modifier.semantics { onClick(label) { click(); true } }.pointerInput(repeatOnHold, onHold != null) {
         detectTapGestures(onPress = {
             coroutineScope {
                 pressed = true
                 var held = false
+                if (repeatOnHold) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    click()
+                }
                 val timer = launch {
                     delay(viewConfiguration.longPressTimeoutMillis)
+                    if (repeatOnHold) {
+                        while (true) {
+                            click()
+                            delay(80)
+                        }
+                    }
                     held = true
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     hold?.invoke(true)
                 }
                 try {
-                    if (tryAwaitRelease() && !held) {
+                    if (tryAwaitRelease() && !held && !repeatOnHold) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         click()
                     }
