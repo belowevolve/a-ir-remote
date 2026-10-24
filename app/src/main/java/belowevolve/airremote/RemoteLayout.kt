@@ -53,7 +53,7 @@ internal object TvLayout {
     val ColorKeyHeight = 32.dp
     val ColorKeyShape = RoundedCornerShape(13.dp)
     val AppIconSize = 32.dp
-    val DpadMaxSize = 252.dp
+    val DpadMaxSize = 320.dp
     val DpadInset = 4.dp
     val DpadBorder = 1.dp
     val ConfirmSize = 84.dp
