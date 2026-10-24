@@ -26,6 +26,8 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     private var enabled = false
     private var closed = false
     private var host: BluetoothDevice? = null
+    private var pendingHost: BluetoothDevice? = null
+    private var disconnectingHost: BluetoothDevice? = null
     private var output: PcHidOutput? = null
     var registered by mutableStateOf(value = false)
         private set
@@ -42,6 +44,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     var modifiers by mutableIntStateOf(0)
         private set
     private val prefs = application.getSharedPreferences("pc_remote", Context.MODE_PRIVATE)
+    private val selection = PcHostSelection(prefs.getString("host", null), prefs.getBoolean("auto_connect", true))
     var sensitivity by mutableFloatStateOf(prefs.getFloat("sensitivity", 1.6f))
         private set
 
@@ -70,6 +73,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             if (!isRegistered) {
                 output?.close(); output = null
                 host = null
+                disconnectingHost = null
                 connected = false
                 modifiers = 0
                 dragging = false
@@ -79,14 +83,24 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             } else {
                 status = "Готов к сопряжению с Windows"
                 refreshDevices()
-                val previous = prefs.getString("host", null)
-                (pluggedDevice ?: devices.firstOrNull { it.address == previous })?.let(::connect)
+                if (selection.allowed) {
+                    val target = pendingHost ?: devices.firstOrNull { it.address == selection.address }
+                        ?: pluggedDevice?.takeIf { selection.accepts(it.address) }
+                    target?.let(::connect)
+                } else status = "Отключено. Выбери компьютер для подключения"
             }
         }
 
         override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) = safely {
             when (state) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    if (!selection.accepts(device.address) || !registered || disconnectingHost == device) {
+                        hid?.disconnect(device)
+                        return@safely
+                    }
+                    if (host == device && connected) return@safely
+                    pendingHost = null
+                    selection.select(device.address)
                     output?.close()
                     val profile = hid
                     output = PcHidOutput { id, report ->
@@ -104,14 +118,26 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                     prefs.edit { putString("host", device.address) }
                     releaseInputs()
                 }
-                BluetoothProfile.STATE_CONNECTING -> status = "Подключаемся к ${device.name ?: "компьютеру"}…"
-                BluetoothProfile.STATE_DISCONNECTED -> if (host == null || host == device) {
-                    output?.close(); output = null
-                    host = null
-                    connected = false
-                    modifiers = 0
-                    dragging = false
-                    status = "Соединение закрыто. Выбери компьютер для подключения"
+                BluetoothProfile.STATE_CONNECTING -> {
+                    if (!selection.accepts(device.address)) hid?.disconnect(device)
+                    else {
+                        if (host == null) host = device
+                        status = "Подключаемся к ${device.name ?: "компьютеру"}…"
+                    }
+                }
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    if (disconnectingHost == device) disconnectingHost = null
+                    if (host == device) {
+                        output?.close(); output = null
+                        host = null
+                        connected = false
+                        modifiers = 0
+                        dragging = false
+                        status = "Соединение закрыто. Выбери компьютер для подключения"
+                        val next = pendingHost
+                        pendingHost = null
+                        if (next != null && selection.accepts(next.address)) connect(next)
+                    }
                 }
             }
         }
@@ -161,6 +187,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             registered = false
             connected = false
             host = null
+            disconnectingHost = null
             modifiers = 0
             dragging = false
             status = "Служба Bluetooth отключена"
@@ -212,12 +239,54 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     }
     fun deviceLabel(device: BluetoothDevice): String = try { device.name ?: device.address } catch (_: SecurityException) { "Компьютер" }
     fun connect(device: BluetoothDevice): Unit = safely {
+        if (!hasPermission()) { permissionDenied(); return@safely }
+        selection.select(device.address)
+        prefs.edit { putString("host", device.address); putBoolean("auto_connect", true) }
+        pendingHost = device
         if (!registered) { start(); return@safely }
-        if (host != null && host != device) { status = "Сначала отключи текущий компьютер"; return@safely }
-        status = if (hid?.connect(device) == true) "Подключаемся к ${device.name ?: "компьютеру"}…"
-        else "Подключение не удалось. Проверь Bluetooth на ПК и повтори"
+        if (disconnectingHost != null) {
+            status = "Переключаемся на ${deviceLabel(device)}…"
+            return@safely
+        }
+        val current = host
+        if (current == device && connected) { pendingHost = null; return@safely }
+        if (current != null && current != device) {
+            releaseInputs()
+            if (hid?.disconnect(current) == true) {
+                disconnectingHost = current
+                connected = false
+                status = "Переключаемся на ${deviceLabel(device)}…"
+            } else {
+                pendingHost = null
+                status = "Не удалось отключить текущий ПК. Повтори выбор компьютера"
+            }
+            return@safely
+        }
+        pendingHost = null
+        if (hid?.connect(device) == true) {
+            host = device // Also track an in-flight connection so it can be cancelled.
+            status = "Подключаемся к ${deviceLabel(device)}…"
+        } else status = "Подключение не удалось. Проверь Bluetooth на ПК и повтори"
     }
-    fun disconnect() = safely { releaseInputs(); host?.let { hid?.disconnect(it) } }
+    fun disconnect() = safely {
+        selection.disconnect()
+        pendingHost = null
+        prefs.edit { putBoolean("auto_connect", false) }
+        releaseInputs()
+        val current = host
+        if (current != null && hid?.disconnect(current) != true) {
+            status = "Не удалось отключить ПК. Повтори отключение"
+        } else {
+            disconnectingHost = current
+            connected = false
+            status = "Отключено. Выбери компьютер для подключения"
+        }
+    }
+    fun preparePairing() {
+        if (host != null) disconnect()
+        selection.pair()
+        prefs.edit { remove("host"); putBoolean("auto_connect", true) }
+    }
     fun key(code: Int) {
         if (!connected) return
         if (output?.key(code, modifiers) != true) status = "Bluetooth не успевает отправлять. Переподключи ПК"
@@ -229,7 +298,9 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         modifiers = 0
     }
     fun toggleModifier(mask: Int) { if (connected) modifiers = modifiers xor mask }
-    fun volume(direction: Int) { if (connected) output?.consumer(direction) }
+    fun volume(direction: Int) {
+        if (connected && output?.consumer(direction) != true) status = "Bluetooth не успевает отправлять. Переподключи ПК"
+    }
     fun move(x: Int, y: Int, wheel: Int = 0) { if (connected) output?.move(x, y, wheel) }
     fun click(right: Boolean = false) {
         if (!connected) return

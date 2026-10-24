@@ -9,6 +9,7 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
     private var generation = 0
     private var closed = false
     private var nextKeyAt = 0L
+    private var nextConsumerAt = 0L
     private var pointerPending = false
     private var pointerVersion = 0
     private var dx = 0
@@ -79,10 +80,15 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         schedule(0, generation) { transmit(PcHidReports.MOUSE, report) }
     }
 
-    @Synchronized fun consumer(value: Int) {
-        if (closed) return
-        schedule(0, generation) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer(value == 1, value == 2, value == 3)) }
-        schedule(TimeUnit.MILLISECONDS.toNanos(10), generation) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer()) }
+    @Synchronized fun consumer(value: Int): Boolean {
+        if (closed || worker.queue.size >= 30) return false
+        val now = System.nanoTime()
+        val start = maxOf(now, nextConsumerAt)
+        val epoch = generation
+        schedule(start - now, epoch) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer(value == 1, value == 2, value == 3)) }
+        schedule(start - now + TimeUnit.MILLISECONDS.toNanos(10), epoch) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer()) }
+        nextConsumerAt = start + TimeUnit.MILLISECONDS.toNanos(20)
+        return true
     }
 
     @Synchronized fun release() {
@@ -90,6 +96,7 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         generation++
         worker.queue.clear()
         nextKeyAt = 0
+        nextConsumerAt = 0
         pointerPending = false
         dx = 0; dy = 0; wheel = 0; buttons = 0
         schedule(0, generation) {

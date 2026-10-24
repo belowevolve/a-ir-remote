@@ -101,14 +101,14 @@ internal fun PcScreen(model: PcRemoteModel) {
                     TextButton(enabled = model.registered, onClick = {
                         if (Build.VERSION.SDK_INT >= 31 && view.context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
                             permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
-                        else launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120))
+                        else { model.preparePairing(); launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)) }
                     }) { Text("Видимость · 2 минуты") }
                     TextButton(onClick = { model.start(); model.refreshDevices() }) { Text("Обновить") }
                 }
                 if (launchError.isNotEmpty()) Text(launchError)
                 Column {
                     model.devices.forEach { device ->
-                        TextButton(enabled = model.registered && !model.connected, onClick = { model.connect(device); devicesVisible = false }) { Text(model.deviceLabel(device)) }
+                        TextButton(enabled = model.registered, onClick = { model.connect(device) }) { Text(model.deviceLabel(device)) }
                     }
                 }
                 if (model.connected) TextButton(onClick = model::disconnect) { Text("Отключить компьютер") }

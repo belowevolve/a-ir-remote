@@ -7,6 +7,26 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class PcHidOutputTest {
+    @Test fun rapidVolumeCommandsEachHaveTheirOwnRelease() {
+        val reports = Collections.synchronizedList(mutableListOf<ByteArray>())
+        val sent = CountDownLatch(6)
+        val output = PcHidOutput { id, bytes ->
+            if (id == PcHidReports.CONSUMER) { reports.add(bytes); sent.countDown() }
+        }
+        try {
+            assertTrue(output.consumer(1))
+            assertTrue(output.consumer(1))
+            assertTrue(output.consumer(2))
+            assertTrue(sent.await(2, TimeUnit.SECONDS))
+            val expected = listOf(
+                PcHidReports.consumer(true, false, false), PcHidReports.consumer(),
+                PcHidReports.consumer(true, false, false), PcHidReports.consumer(),
+                PcHidReports.consumer(false, true, false), PcHidReports.consumer(),
+            )
+            expected.zip(reports.take(6)).forEach { (want, actual) -> assertArrayEquals(want, actual) }
+        } finally { output.close() }
+    }
+
     @Test fun keyboardSendsOrderedPressAndReleaseOffCallerThread() {
         val reports = Collections.synchronizedList(mutableListOf<ByteArray>())
         val done = CountDownLatch(4)
