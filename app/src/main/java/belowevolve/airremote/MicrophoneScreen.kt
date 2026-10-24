@@ -43,9 +43,8 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
     fun start() {
         val number = port.toIntOrNull()
         val address = host.trim()
-        if (!address.matches(Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) || address.split('.').any { (it.toInt() !in 0..255) }) {
-            error = "Укажи IPv4-адрес компьютера"; return
-        }
+        try { lanAddress(address) }
+        catch (e: IllegalArgumentException) { error = e.message.orEmpty(); return }
         if (number == null || (number !in 1..65535)) { error = "Порт должен быть от 1 до 65535"; return }
         try {
             beforeStart()

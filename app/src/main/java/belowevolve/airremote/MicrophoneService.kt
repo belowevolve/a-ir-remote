@@ -16,7 +16,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicLong
@@ -129,12 +128,7 @@ class MicrophoneService : Service() {
 
     private suspend fun stream(host: String, port: Int, natural: Boolean) = coroutineScope {
         require(port in (1..65535)) { "Порт должен быть от 1 до 65535" }
-        // Numeric LAN addresses only: no DNS stalls or accidental Internet streaming.
-        require(host.matches(Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) && host.split('.').all { (it.toInt() in 0..255) }) {
-            "Укажи IPv4-адрес ПК, например 192.168.1.20"
-        }
-        val address = InetAddress.getByName(host)
-        require(address.isSiteLocalAddress || address.isLinkLocalAddress) { "Нужен локальный IP-адрес ПК" }
+        val address = lanAddress(host)
         if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED)
             throw SecurityException("Разреши доступ к устройствам поблизости")
         val cm = getSystemService(ConnectivityManager::class.java)
@@ -185,37 +179,43 @@ class MicrophoneService : Service() {
                 }
             }
             val capture = launch(Dispatchers.IO) {
-                Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-                val shorts = ShortArray(MicTransport.SAMPLES)
-                var ticks = 0
-                record.startRecording()
-                check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Микрофон недоступен" }
-                mutableStatus.update { it.copy(streaming = true, message = "Передача на $host:$port",
-                    format = "48 кГц · моно · ${if (floatPcm) "Float32" else "PCM16"} · ${if (unprocessed) "без обработки" else if (natural) "распознавание речи" else "связь"}") }
-                // Notification IPC must not delay the first read or the TCP writer.
-                launch(Dispatchers.Main) { notifyStatus() }
-                while (isActive) {
-                    val samples = FloatArray(MicTransport.SAMPLES)
-                    var offset = 0
-                    while (offset < samples.size) {
-                        ensureActive()
-                        val count = if (floatPcm) record.read(samples, offset, samples.size - offset, AudioRecord.READ_BLOCKING)
-                            else record.read(shorts, offset, samples.size - offset, AudioRecord.READ_BLOCKING)
-                        check(count > 0) { "Ошибка чтения микрофона: $count" }
-                        if (!floatPcm) for (i in offset until offset + count) samples[i] = shorts[i] / 32768f
-                        offset += count
+                val previousPriority = Process.getThreadPriority(Process.myTid())
+                try {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+                    val shorts = ShortArray(MicTransport.SAMPLES)
+                    var ticks = 0
+                    record.startRecording()
+                    check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Микрофон недоступен" }
+                    mutableStatus.update { it.copy(streaming = true, message = "Передача на $host:$port",
+                        format = "48 кГц · моно · ${if (floatPcm) "Float32" else "PCM16"} · ${if (unprocessed) "без обработки" else if (natural) "распознавание речи" else "связь"}") }
+                    // Notification IPC must not delay the first read or the TCP writer.
+                    launch(Dispatchers.Main) { notifyStatus() }
+                    while (isActive) {
+                        val samples = FloatArray(MicTransport.SAMPLES)
+                        var offset = 0
+                        while (offset < samples.size) {
+                            ensureActive()
+                            val count = if (floatPcm) record.read(samples, offset, samples.size - offset, AudioRecord.READ_BLOCKING)
+                                else record.read(shorts, offset, samples.size - offset, AudioRecord.READ_BLOCKING)
+                            check(count > 0) { "Ошибка чтения микрофона: $count" }
+                            if (!floatPcm) for (i in offset until offset + count) samples[i] = shorts[i] / 32768f
+                            offset += count
+                        }
+                        // Keep draining the hardware during mute; silence replaces the captured frame.
+                        if (mutableStatus.value.muted) samples.fill(0f)
+                        val frame = CapturedFrame(samples, System.nanoTime())
+                        if (!frames.trySend(frame).isSuccess) {
+                            frames.tryReceive()
+                            frames.trySend(frame)
+                            mutableStatus.update { it.copy(dropped = it.dropped + 1) }
+                        }
+                        if (++ticks % 10 == 0) mutableStatus.update { state ->
+                            state.copy(peak = if (state.muted) 0f else samples.maxOf { abs(it) }.coerceIn(0f, 1f))
+                        }
                     }
-                    // Keep draining the hardware during mute; silence replaces the captured frame.
-                    if (mutableStatus.value.muted) samples.fill(0f)
-                    val frame = CapturedFrame(samples, System.nanoTime())
-                    if (!frames.trySend(frame).isSuccess) {
-                        frames.tryReceive()
-                        frames.trySend(frame)
-                        mutableStatus.update { it.copy(dropped = it.dropped + 1) }
-                    }
-                    if (++ticks % 10 == 0) mutableStatus.update { state ->
-                        state.copy(peak = if (state.muted) 0f else samples.maxOf { abs(it) }.coerceIn(0f, 1f))
-                    }
+                } finally {
+                    // This blocking capture loop runs on a shared IO worker.
+                    Process.setThreadPriority(previousPriority)
                 }
             }
             try {
