@@ -5,7 +5,6 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -14,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
@@ -31,13 +29,6 @@ fun KeyboardScreen(model: RemoteModel) {
         val imeOptions = model.keyboardImeOptions.takeIf { (it and 0xff) != 0 } ?: EditorInfo.IME_ACTION_DONE
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(24.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = model::hideKeyboard) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Закрыть клавиатуру")
-                    }
-                    Text("Клавиатура", fontSize = 24.sp)
-                }
-                Spacer(Modifier.height(32.dp))
                 AndroidView(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     factory = { context ->
@@ -70,7 +61,9 @@ fun KeyboardScreen(model: RemoteModel) {
                     editor.imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
                     editor.applyValue(model.keyboardValue)
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = model::hideKeyboard) { Text("Отмена") }
+                    Spacer(Modifier.weight(1f))
                     IconButton(onClick = model::deleteKeyboardCharacter) {
                         Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = "Удалить символ на ТВ")
                     }
