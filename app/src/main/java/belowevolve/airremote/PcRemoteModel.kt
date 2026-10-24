@@ -34,6 +34,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     private var disconnectingHost: BluetoothDevice? = null
     private var output: PcHidOutput? = null
     private var reconnectJob: Job? = null
+    private var keepingConnection = false
     private var keyboardLeds = 0
     var capsLock by mutableStateOf(false)
         private set
@@ -87,6 +88,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             registered = isRegistered
             registering = false
             if (!isRegistered) {
+                stopKeepingConnection()
                 output?.close(); output = null
                 host = null
                 disconnectingHost = null
@@ -95,7 +97,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 dragging = false
                 status = "HID отключён. Нажми «Подключить», чтобы повторить"
                 scheduleReconnect()
-            } else if (!foreground || !enabled) {
+            } else if (closed || (!foreground && !keepingConnection) || (!enabled && !connected)) {
                 safely { hid?.unregisterApp() }
             } else {
                 status = "Готов к сопряжению с Windows"
@@ -116,6 +118,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                         return@safely
                     }
                     if (host == device && connected) return@safely
+                    keepConnection()
                     pendingHost = null
                     selection.select(device.address)
                     output?.close()
@@ -157,7 +160,10 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                         val next = pendingHost
                         pendingHost = null
                         if (next != null && selection.accepts(next.address)) connect(next)
-                        else scheduleReconnect()
+                        else {
+                            stopKeepingConnection()
+                            scheduleReconnect()
+                        }
                     }
                 }
             }
@@ -233,6 +239,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             if (foreground && enabled) register()
         }
         override fun onServiceDisconnected(profile: Int) {
+            stopKeepingConnection()
             output?.close(); output = null
             hid = null
             requesting = false
@@ -244,6 +251,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             modifiers = 0
             dragging = false
             status = "Служба Bluetooth отключена"
+            scheduleReconnect()
         }
     }
     private val receiver = object : BroadcastReceiver() {
@@ -263,6 +271,19 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     fun activate() { enabled = true; start(); scheduleReconnect() }
     fun deactivate() { releaseInputs(); enabled = false; reconnectJob?.cancel() }
     fun permissionDenied() { status = "Для управления ПК разреши доступ к устройствам поблизости" }
+
+    private fun keepConnection() {
+        // Start while the Activity is visible, before Android lowers the UID's importance.
+        if (keepingConnection || !foreground) return
+        context.startForegroundService(Intent(context, PcConnectionService::class.java))
+        keepingConnection = true
+    }
+
+    private fun stopKeepingConnection() {
+        if (!keepingConnection) return
+        context.stopService(Intent(context, PcConnectionService::class.java))
+        keepingConnection = false
+    }
     fun start(): Unit = safely {
         if (!hasPermission()) { permissionDenied(); return@safely }
         if (adapter == null) { status = "На телефоне нет Bluetooth"; return@safely }
@@ -316,10 +337,14 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             return@safely
         }
         pendingHost = null
+        keepConnection()
         if (hid?.connect(device) == true) {
             host = device // Also track an in-flight connection so it can be cancelled.
             status = "Подключаемся к ${deviceLabel(device)}…"
-        } else status = "Подключение не удалось. Проверь Bluetooth на ПК и повтори"
+        } else {
+            if (!connected) stopKeepingConnection()
+            status = "Подключение не удалось. Проверь Bluetooth на ПК и повтори"
+        }
     }
     fun disconnect() = safely {
         reconnectJob?.cancel()
@@ -333,6 +358,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         } else {
             disconnectingHost = current
             connected = false
+            stopKeepingConnection()
             status = "Отключено. Выбери компьютер для подключения"
         }
     }
@@ -388,5 +414,6 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         output?.close(); output = null
         context.unregisterReceiver(receiver)
         safely { hid?.unregisterApp(); hid?.let { adapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) } }
+        stopKeepingConnection()
     }
 }
