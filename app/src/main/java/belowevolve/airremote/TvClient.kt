@@ -149,8 +149,9 @@ class TvClient(private val identity: TvIdentity) {
                             onVoiceRequest(voice.requested != null)
                         }
                     }
-                    msg.hasRemoteVoiceEnd() -> synchronized(writeLock) {
-                        if (socket === s && voice.end(msg.remoteVoiceEnd.sessionId)) onVoiceRequest(false)
+                    msg.hasRemoteVoiceSessionEnd() || msg.hasRemoteVoiceEnd() -> synchronized(writeLock) {
+                        val id = if (msg.hasRemoteVoiceSessionEnd()) msg.remoteVoiceSessionEnd.sessionId else msg.remoteVoiceEnd.sessionId
+                        if (socket === s && voice.end(id)) onVoiceRequest(false)
                     }
                 }
             }
@@ -213,9 +214,7 @@ class TvClient(private val identity: TvIdentity) {
     fun audio(id: Int, bytes: ByteArray) = synchronized(writeLock) {
         if (voice.active != id) return@synchronized
         require(bytes.size in 1..(20 * 1024))
-        send(RemoteMessage.newBuilder().setRemoteVoicePayload(
-            RemoteVoicePayload.newBuilder().setSessionId(id).setSamples(ByteString.copyFrom(bytes)),
-        ).build())
+        send(RemoteVoiceClientMessage.newBuilder().setRemoteVoicePayload(ByteString.copyFrom(bytes)).build())
     }
 
     fun endVoice(id: Int) = synchronized(writeLock) {

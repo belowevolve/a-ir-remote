@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TvVoiceSessionTest {
+    @Test fun voiceWireFormatIsDirectional() {
+        val pcm = byteArrayOf(8, 1, 18, 0)
+        val message = remote.Remotemessage.RemoteVoiceClientMessage.newBuilder()
+            .setRemoteVoicePayload(com.google.protobuf.ByteString.copyFrom(pcm)).build()
+        // Field 31, length 4, raw PCM. No nested session ID or samples tags.
+        assertArrayEquals(byteArrayOf(0xfa.toByte(), 1, 4, 8, 1, 18, 0), message.toByteArray())
+        // TV -> phone field 31 is instead a nested session-end message.
+        val ended = remote.Remotemessage.RemoteMessage.parseFrom(byteArrayOf(0xfa.toByte(), 1, 2, 8, 7))
+        assertTrue(ended.hasRemoteVoiceSessionEnd())
+        assertEquals(7, ended.remoteVoiceSessionEnd.sessionId)
+    }
+
     @Test fun tvInitiatedDictationCanStartWithoutSearchKey() {
         val voice = TvVoiceSession()
         voice.request(7)

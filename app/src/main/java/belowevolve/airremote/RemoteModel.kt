@@ -321,7 +321,10 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                             viewModelScope.launch {
                                 if (foreground && generation == connectionGeneration) {
                                     voiceRequested = requested
-                                    if (requested && !recording) message = "ТВ ждёт голос. Нажми «Говорить» на пульте"
+                                    if (requested && !recording) {
+                                        keyboardVisible = false
+                                        message = "ТВ ждёт голос. Нажми «Говорить» на пульте"
+                                    }
                                     if (!requested) stopVoice()
                                 }
                             }
