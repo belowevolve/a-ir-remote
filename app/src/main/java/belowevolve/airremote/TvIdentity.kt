@@ -15,6 +15,7 @@ import java.security.PrivateKey
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Date
+import java.util.UUID
 import javax.net.ssl.X509ExtendedKeyManager
 import javax.net.ssl.X509TrustManager
 import javax.net.ssl.SSLContext
@@ -46,8 +47,8 @@ class TvIdentity(context: Context) {
                             KeyProperties.SIGNATURE_PADDING_RSA_PSS
                         )
                         .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setCertificateSubject(X500Principal("CN=Air Remote"))
-                        .setCertificateSerialNumber(BigInteger.ONE)
+                        .setCertificateSubject(X500Principal("CN=Air Remote/${UUID.randomUUID()}"))
+                        .setCertificateSerialNumber(BigInteger(159, SecureRandom()).add(BigInteger.ONE))
                         .setCertificateNotBefore(Date(0))
                         .setCertificateNotAfter(Date(4102444800000L))
                         .build()
@@ -62,6 +63,7 @@ class TvIdentity(context: Context) {
     fun pin(host: String, cert: X509Certificate) {
         prefs.edit {
             putString(host, fingerprint(cert))
+            putString("$host:identity", ALIAS)
         }
     }
 
@@ -74,13 +76,17 @@ class TvIdentity(context: Context) {
 
     @SuppressLint("TrustAllX509TrustManager")
     fun context(host: String, pairing: Boolean): SSLContext {
+        // Keep old pairings usable until the user pairs that TV again. New pairings
+        // always use the installation-specific subject; retain the old private key.
+        val clientAlias = if (pairing) ALIAS else prefs.getString("$host:identity", null)
+            ?: if (store.containsAlias(LEGACY_ALIAS)) LEGACY_ALIAS else ALIAS
         val km = object : X509ExtendedKeyManager() {
-            override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?) = arrayOf(ALIAS)
-            override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?) = ALIAS
+            override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?) = arrayOf(clientAlias)
+            override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?) = clientAlias
             override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?) = null
             override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?) = null
-            override fun getCertificateChain(alias: String?) = arrayOf(certificate)
-            override fun getPrivateKey(alias: String?) = store.getKey(ALIAS, null) as PrivateKey
+            override fun getCertificateChain(alias: String?) = arrayOf(store.getCertificate(clientAlias) as X509Certificate)
+            override fun getPrivateKey(alias: String?) = store.getKey(clientAlias, null) as PrivateKey
         }
 
         @SuppressLint("TrustAllX509TrustManager")
@@ -105,6 +111,7 @@ class TvIdentity(context: Context) {
     }
 
     companion object {
-        private const val ALIAS = "air-remote-client-tls"
+        private const val LEGACY_ALIAS = "air-remote-client-tls"
+        private const val ALIAS = "air-remote-client-tls-v2"
     }
 }
