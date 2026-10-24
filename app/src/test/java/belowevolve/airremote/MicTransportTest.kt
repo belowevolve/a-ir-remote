@@ -12,6 +12,14 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class MicTransportTest {
+    @org.junit.Test fun latencyBudgetDropsOldFramesAndRespectsHardwareMinimum() {
+        org.junit.Assert.assertTrue(MicTransport.isFresh(1_000_000L, 51_000_000L))
+        org.junit.Assert.assertFalse(MicTransport.isFresh(1_000_000L, 62_000_000L))
+        org.junit.Assert.assertEquals(1920, MicTransport.recorderBufferBytes(1000, false))
+        org.junit.Assert.assertEquals(3840, MicTransport.recorderBufferBytes(1000, true))
+        org.junit.Assert.assertEquals(8192, MicTransport.recorderBufferBytes(8192, false))
+    }
+
     @Test fun matchesIndependentWireFixture() {
         // 14-byte protobuf: buffer field, 48000 rate, mono, Android PCM_FLOAT = 4.
         val expected = byteArrayOf(0, 0, 0, 14, 10, 4, 0, 0, 0, 63, 16, -128, -9, 2, 24, 1, 32, 4)

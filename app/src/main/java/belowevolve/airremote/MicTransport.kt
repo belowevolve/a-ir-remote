@@ -12,6 +12,11 @@ import java.nio.ByteOrder
 /** AndroidMic TCP: ASCII handshake, then big-endian length + protobuf containing LE PCM. */
 internal object MicTransport {
     const val RATE = 48_000
+    const val QUEUED_FRAMES = 3
+    const val MAX_FRAME_AGE_NS = 60_000_000L
+    fun recorderBufferBytes(minimum: Int, pcmFloat: Boolean) =
+        maxOf(minimum, SAMPLES * (if (pcmFloat) 4 else 2) * 2)
+    fun isFresh(capturedAt: Long, now: Long) = now - capturedAt <= MAX_FRAME_AGE_NS
     const val SAMPLES = 480 // 10 ms; independent of the device's recording buffer size.
 
     fun handshake(input: InputStream, output: OutputStream) {

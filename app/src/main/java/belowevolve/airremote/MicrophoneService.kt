@@ -10,6 +10,7 @@ import android.media.*
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.*
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,6 +57,8 @@ class MicrophoneService : Service() {
             context.startService(Intent(context, MicrophoneService::class.java).setAction(MUTE))
         }
     }
+
+    private data class CapturedFrame(val samples: FloatArray, val capturedAt: Long)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var session: Job? = null
@@ -144,7 +147,7 @@ class MicrophoneService : Service() {
         ensureActive()
         network.bindSocket(connection)
         connection.tcpNoDelay = true
-        connection.sendBufferSize = 8192
+        connection.sendBufferSize = 4096
         connection.soTimeout = 3000
         connection.connect(InetSocketAddress(address, port), 3000)
         MicTransport.handshake(connection.getInputStream(), connection.getOutputStream())
@@ -163,13 +166,16 @@ class MicrophoneService : Service() {
             audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
                 it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
             }?.let { record.setPreferredDevice(it) }
-            val frames = Channel<FloatArray>(capacity = 6)
-            val progress = AtomicLong(SystemClock.elapsedRealtime())
+            val frames = Channel<CapturedFrame>(capacity = MicTransport.QUEUED_FRAMES)
+            if (BuildConfig.DEBUG) Log.d("AirRemoteMic", "captureBufferMs=${record.bufferSizeInFrames * 1000 / MicTransport.RATE} sendBufferBytes=${connection.sendBufferSize}")
+            val started = SystemClock.elapsedRealtime()
+            val progress = AtomicLong(started)
             // Socket SO_TIMEOUT only limits reads. Close a blocked writer explicitly.
             val watchdog = scope.launch {
                 while (isActive) {
                     delay(100.milliseconds)
-                    if (SystemClock.elapsedRealtime() - progress.get() >= 1500) {
+                    if (SystemClock.elapsedRealtime() - progress.get() >=
+                        (if (progress.get() == started) 1500 else 500)) {
                         streamFailure = "Сеть или микрофон не отвечает. Подключись заново"
                         runCatching { connection.close() }
                         runCatching { record.stop() }
@@ -201,9 +207,10 @@ class MicrophoneService : Service() {
                     }
                     // Keep draining the hardware during mute; silence replaces the captured frame.
                     if (mutableStatus.value.muted) samples.fill(0f)
-                    if (!frames.trySend(samples).isSuccess) {
+                    val frame = CapturedFrame(samples, System.nanoTime())
+                    if (!frames.trySend(frame).isSuccess) {
                         frames.tryReceive()
-                        frames.trySend(samples)
+                        frames.trySend(frame)
                         mutableStatus.update { it.copy(dropped = it.dropped + 1) }
                     }
                     if (++ticks % 10 == 0) mutableStatus.update { state ->
@@ -212,10 +219,18 @@ class MicrophoneService : Service() {
                 }
             }
             try {
-                for (samples in frames) {
+                for (frame in frames) {
                     ensureActive()
+                    val writeStarted = System.nanoTime()
+                    if (!MicTransport.isFresh(frame.capturedAt, writeStarted)) {
+                        mutableStatus.update { it.copy(dropped = it.dropped + 1) }
+                        continue
+                    }
+                    val samples = frame.samples
                     MicTransport.write(output, MicTransport.frame(samples, samples.size, mutableStatus.value.muted, floatPcm))
                     progress.set(SystemClock.elapsedRealtime())
+                    val writeMs = (System.nanoTime() - writeStarted) / 1_000_000
+                    if (BuildConfig.DEBUG && writeMs >= 100) Log.d("AirRemoteMic", "slowWriteMs=$writeMs")
                 }
             } finally {
                 watchdog.cancel()
@@ -239,7 +254,7 @@ class MicrophoneService : Service() {
             val record = runCatching { AudioRecord.Builder().setAudioSource(source)
                 .setAudioFormat(AudioFormat.Builder().setSampleRate(MicTransport.RATE)
                     .setChannelMask(AudioFormat.CHANNEL_IN_MONO).setEncoding(encoding).build())
-                .setBufferSizeInBytes(maxOf(min, MicTransport.SAMPLES * 4 * 4)).build() }.getOrNull() ?: continue
+                .setBufferSizeInBytes(MicTransport.recorderBufferBytes(min, encoding == AudioFormat.ENCODING_PCM_FLOAT)).build() }.getOrNull() ?: continue
             if (record.state == AudioRecord.STATE_INITIALIZED) return record to (encoding == AudioFormat.ENCODING_PCM_FLOAT)
             record.release()
         }
