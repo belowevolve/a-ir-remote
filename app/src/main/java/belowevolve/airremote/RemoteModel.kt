@@ -37,6 +37,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     var pairing by mutableStateOf(value = false)
     var busy by mutableStateOf(value = false)
     var recording by mutableStateOf(value = false)
+    var voiceRequested by mutableStateOf(false)
+        private set
     var message by mutableStateOf(value = "")
     
     var keyboardVisible by mutableStateOf(value = false)
@@ -100,6 +102,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     private fun resetKeyboard() {
         connectionGeneration++
+        voiceRequested = false
+        stopVoice()
         keyboardVisible = false
         keyboardValue = TextFieldValue()
         keyboardEpoch = 0L
@@ -313,6 +317,14 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                             viewModelScope.launch {
                                 if (foreground && generation == connectionGeneration) receiveKeyboard(update)
                             }
+                        }, onVoiceRequest = { requested ->
+                            viewModelScope.launch {
+                                if (foreground && generation == connectionGeneration) {
+                                    voiceRequested = requested
+                                    if (requested && !recording) message = "ТВ ждёт голос. Нажми «Говорить» на пульте"
+                                    if (!requested) stopVoice()
+                                }
+                            }
                         }) {
                             viewModelScope.launch {
                                 if (foreground && generation == connectionGeneration) {
@@ -379,6 +391,10 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             message = "Сначала подключите ТВ"
             return
         }
+        if (!voiceRequested) {
+            message = "Открой голосовой поиск в приложении на ТВ, затем нажми «Голос»"
+            return
+        }
         recording = true
         voiceJob = action {
             var recorder: AudioRecord? = null
@@ -402,9 +418,9 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 recorder = input
                 check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон не готов" }
                 input.startRecording()
-                val buffer = ByteArray(20 * 1024)
+                val buffer = ByteArray(8 * 1024)
                 val deadline = System.currentTimeMillis() + 30000
-                while ((currentCoroutineContext().isActive) && (System.currentTimeMillis() < deadline)) {
+                while (currentCoroutineContext().isActive && client.isVoiceActive(id) && System.currentTimeMillis() < deadline) {
                     val count = input.read(buffer, 0, buffer.size)
                     check(count > 0) { "Ошибка записи микрофона: $count" }
                     client.audio(id, buffer.copyOf(count))
@@ -412,7 +428,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 recorder?.let { runCatching { it.stop() }; it.release() }
                 id?.let { runCatching { client.endVoice(it) } }
-                withContext(NonCancellable + Dispatchers.Main) { recording = false }
+                val pending = client.hasVoiceRequest()
+                withContext(NonCancellable + Dispatchers.Main) { recording = false; voiceRequested = pending && connected }
             }
         }
     }

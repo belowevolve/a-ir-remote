@@ -200,9 +200,9 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     )
                     WideButton(
                         icon = if (model.recording) Icons.Rounded.Stop else Icons.Rounded.Mic,
-                        label = if (model.recording) "Стоп" else "Голос",
+                        label = if (model.recording) "Стоп" else if (model.voiceRequested) "Говорить" else "Голос",
                         modifier = Modifier.weight(1f),
-                        active = model.recording,
+                        active = model.recording || model.voiceRequested,
                         onClick = voice,
                     )
                 }

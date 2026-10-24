@@ -22,7 +22,7 @@ class TvClient(private val identity: TvIdentity) {
     private var pairingSocket: SSLSocket? = null
     private var pairingHost = ""
     private var features = 0
-    private var voiceReady: CompletableDeferred<Int>? = null
+    private val voice = TvVoiceSession()
     private val writeLock = Any()
     private val connectionLock = Any()
     private var connectionVersion = 0L
@@ -90,11 +90,10 @@ class TvClient(private val identity: TvIdentity) {
             connectionVersion++
             socket.also { socket = null }
         }
-        voiceReady?.cancel()
         Dispatchers.IO.dispatch(EmptyCoroutineContext) { runCatching { closing?.close() } }
     }
     
-    fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, ready: () -> Unit) {
+    fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, onVoiceRequest: (Boolean) -> Unit, ready: () -> Unit) {
         val version = synchronized(connectionLock) { connectionVersion }
         val s = open(host, 6466, pairing = false)
         try {
@@ -105,6 +104,8 @@ class TvClient(private val identity: TvIdentity) {
             synchronized(writeLock) {
                 if (socket !== s) throw CancellationException("Соединение отменено")
                 keyboard.reset()
+                voice.reset()
+                onVoiceRequest(false)
                 onKeyboard(keyboard.snapshot())
             }
             while (!s.isClosed) {
@@ -142,7 +143,15 @@ class TvClient(private val identity: TvIdentity) {
                     msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
                     msg.hasRemoteStart() -> ready()
-                    msg.hasRemoteVoiceBegin() -> voiceReady?.complete(msg.remoteVoiceBegin.sessionId)
+                    msg.hasRemoteVoiceBegin() -> synchronized(writeLock) {
+                        if (socket === s) {
+                            voice.request(msg.remoteVoiceBegin.sessionId)
+                            onVoiceRequest(voice.requested != null)
+                        }
+                    }
+                    msg.hasRemoteVoiceEnd() -> synchronized(writeLock) {
+                        if (socket === s && voice.end(msg.remoteVoiceEnd.sessionId)) onVoiceRequest(false)
+                    }
                 }
             }
         } finally {
@@ -188,27 +197,29 @@ class TvClient(private val identity: TvIdentity) {
         )
     }
     
-    suspend fun startVoice(): Int {
+    fun startVoice(): Int = synchronized(writeLock) {
         check((features and 8) != 0) { "ТВ не сообщил о поддержке голоса" }
-        val deferred = CompletableDeferred<Int>(); voiceReady = deferred
-        return try {
-            key(84)
-            val id = withTimeout(5.seconds) { deferred.await() }
+        val id = voice.begin()
+        try {
             send(RemoteMessage.newBuilder().setRemoteVoiceBegin(RemoteVoiceBegin.newBuilder().setSessionId(id)).build())
             id
-        } finally { voiceReady = null }
+        } catch (e: Exception) { voice.end(id); throw e }
     }
-    
-    fun audio(id: Int, bytes: ByteArray) {
-        bytes.asList().chunked(20 * 1024).forEach { chunk ->
-            val samples = chunk.toByteArray().let { if (it.size < (8 * 1024)) it.copyOf(8 * 1024) else it }
-            send(
-                RemoteMessage.newBuilder().setRemoteVoicePayload(
-                    RemoteVoicePayload.newBuilder().setSessionId(id).setSamples(ByteString.copyFrom(samples)),
-                ).build(),
-            )
-        }
+
+    fun hasVoiceRequest(): Boolean = synchronized(writeLock) { voice.requested != null }
+
+    fun isVoiceActive(id: Int): Boolean = synchronized(writeLock) { voice.active == id }
+
+    fun audio(id: Int, bytes: ByteArray) = synchronized(writeLock) {
+        if (voice.active != id) return@synchronized
+        require(bytes.size in 1..(20 * 1024))
+        send(RemoteMessage.newBuilder().setRemoteVoicePayload(
+            RemoteVoicePayload.newBuilder().setSessionId(id).setSamples(ByteString.copyFrom(bytes)),
+        ).build())
     }
-    
-    fun endVoice(id: Int) = send(RemoteMessage.newBuilder().setRemoteVoiceEnd(RemoteVoiceEnd.newBuilder().setSessionId(id)).build())
+
+    fun endVoice(id: Int) = synchronized(writeLock) {
+        if (voice.end(id)) send(RemoteMessage.newBuilder()
+            .setRemoteVoiceEnd(RemoteVoiceEnd.newBuilder().setSessionId(id)).build())
+    }
 }
