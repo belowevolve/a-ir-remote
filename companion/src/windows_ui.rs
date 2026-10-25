@@ -72,7 +72,7 @@ struct Visual {
     status: String,
 }
 impl Visual {
-    unsafe fn new(dpi: u32) -> Self {
+    unsafe fn new(dpi: u32, icon_dpi: u32) -> Self {
         let mut light: u32 = 0;
         let mut len = 4;
         RegGetValueW(
@@ -163,8 +163,18 @@ impl Visual {
             card_brush: CreateSolidBrush(card),
             normal: font(16, 400),
             heading: font(20, 600),
-            theme_icon: themed_icon(icon_colors.0, icon_colors.1, icon_colors.2, 0),
-            caption_icon: themed_icon(icon_colors.0, icon_colors.1, icon_colors.2, 8),
+            theme_icon: themed_icon(
+                icon_colors.0,
+                icon_colors.1,
+                icon_colors.2,
+                GetSystemMetricsForDpi(SM_CXICON, icon_dpi) as usize,
+            ),
+            caption_icon: themed_icon(
+                icon_colors.0,
+                icon_colors.1,
+                icon_colors.2,
+                GetSystemMetricsForDpi(SM_CXSMICON, icon_dpi) as usize,
+            ),
             show_pairing: APP.get().unwrap().phone_connections() == 0,
             connections: APP.get().unwrap().phone_connections(),
             small: font(13, 400),
@@ -246,11 +256,11 @@ unsafe fn icon() -> HICON {
         LR_SHARED,
     ) as _
 }
-unsafe fn themed_icon(primary: u32, detail: u32, background: u32, inset: usize) -> HICON {
+unsafe fn themed_icon(primary: u32, detail: u32, background: u32, size: usize) -> HICON {
     let mut info: BITMAPINFO = std::mem::zeroed();
     info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
-    info.bmiHeader.biWidth = 64;
-    info.bmiHeader.biHeight = -64;
+    info.bmiHeader.biWidth = size as i32;
+    info.bmiHeader.biHeight = -(size as i32);
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     let mut bits = null_mut();
@@ -258,20 +268,19 @@ unsafe fn themed_icon(primary: u32, detail: u32, background: u32, inset: usize) 
     if bitmap.is_null() {
         return CopyIcon(icon());
     }
-    let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, 64 * 64);
+    let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, size * size);
     pixels.fill(0);
-    let size = 64 - 2 * inset;
     let source = crate::windows_icon::pixels(size, primary, detail, background);
     for (index, source) in source.as_chunks::<4>().0.iter().enumerate() {
-        let pixel = &mut pixels[(index / size + inset) * 64 + index % size + inset];
+        let pixel = &mut pixels[index];
         let a = source[3] as u32;
         *pixel = (source[0] as u32 * a / 255)
             | (source[1] as u32 * a / 255) << 8
             | (source[2] as u32 * a / 255) << 16
             | a << 24;
     }
-    let mask_bits = [0u8; 512];
-    let mask = CreateBitmap(64, 64, 1, 1, mask_bits.as_ptr() as _);
+    let mask_bits = vec![0u8; size.div_ceil(16) * 2 * size];
+    let mask = CreateBitmap(size as i32, size as i32, 1, 1, mask_bits.as_ptr() as _);
     let icon_info = ICONINFO {
         fIcon: 1,
         xHotspot: 0,
@@ -701,10 +710,10 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             SetWindowLongPtrW(
                 window,
                 GWLP_USERDATA,
-                Box::into_raw(Box::new(Visual::new(fit_dpi(
+                Box::into_raw(Box::new(Visual::new(
+                    fit_dpi(GetDpiForWindow(window), window),
                     GetDpiForWindow(window),
-                    window,
-                )))) as _,
+                ))) as _,
             );
             controls(window);
             resize(window);
@@ -749,7 +758,7 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             SetWindowLongPtrW(
                 window,
                 GWLP_USERDATA,
-                Box::into_raw(Box::new(Visual::new(fit_dpi(dpi, window)))) as _,
+                Box::into_raw(Box::new(Visual::new(fit_dpi(dpi, window), dpi))) as _,
             );
             let current = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
             current.show_pairing = (*old).show_pairing;
