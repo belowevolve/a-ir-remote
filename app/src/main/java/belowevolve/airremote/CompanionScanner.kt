@@ -102,7 +102,7 @@ internal fun CompanionScanner(onCode: (String) -> Unit, onManualCode: () -> Unit
                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
             }
         },
-        dismissButton = { TextButton(onClick = onManualCode) { Text("Ввести код") } },
-        confirmButton = { TextButton(onClick = dismiss) { Text("Отмена") } },
+        dismissButton = { TextButton(onClick = dismiss) { Text("Отмена") } },
+        confirmButton = { TextButton(onClick = onManualCode) { Text("Ввести код") } },
     )
 }
