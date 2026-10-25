@@ -4,7 +4,7 @@ Unicode true
 !include x64.nsh
 !include WinVer.nsh
 Name "Air Remote"
-OutFile "..\..\artifacts\Air-Remote-Setup-0.5.4.exe"
+OutFile "..\..\artifacts\Air-Remote-Setup-0.5.5.exe"
 InstallDir "$PROGRAMFILES64\Air Remote"
 InstallDirRegKey HKLM "Software\AirRemote" "InstallDir"
 RequestExecutionLevel admin
@@ -70,7 +70,7 @@ Section "Air Remote: пульт, клавиатура и синхронизац�
   CreateShortcut "$SMPROGRAMS\Air Remote\Air Remote.lnk" "$INSTDIR\air-remote-companion.exe"
   SetShellVarContext all
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayName" "Air Remote"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayVersion" "0.5.4"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayVersion" "0.5.5"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayIcon" "$INSTDIR\air-remote-companion.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "NoModify" 1

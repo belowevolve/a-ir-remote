@@ -23,6 +23,7 @@ const CABLE: i32 = 107;
 const PAIR: i32 = 108;
 const STARTUP: i32 = 109;
 const SHOW: i32 = 110;
+const CONNECT_PHONE: i32 = 111;
 const TRAY: u32 = WM_APP + 1;
 unsafe fn fit_dpi(dpi: u32, window: HWND) -> u32 {
     let mut info: MONITORINFO = std::mem::zeroed();
@@ -806,6 +807,13 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
                     }
                     InvalidateRect(GetDlgItem(window, STARTUP), null(), 0);
                 }
+                CONNECT_PHONE => {
+                    let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
+                    v.show_pairing = true;
+                    resize(window);
+                    ShowWindow(window, SW_RESTORE);
+                    SetForegroundWindow(window);
+                }
                 SHOW => {
                     ShowWindow(window, SW_RESTORE);
                     SetForegroundWindow(window);
@@ -896,12 +904,12 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
                 let connected = APP.get().unwrap().phone_connections() > 0;
                 AppendMenuW(
                     menu,
-                    MF_STRING | MF_GRAYED,
-                    0,
+                    MF_STRING | if connected { MF_GRAYED } else { 0 },
+                    CONNECT_PHONE as usize,
                     wide(if connected {
                         "Телефон подключён"
                     } else {
-                        "Нет подключения к телефону"
+                        "Подключить телефон"
                     })
                     .as_ptr(),
                 );
