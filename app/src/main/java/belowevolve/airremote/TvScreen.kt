@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -84,7 +85,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
             ) {
                 AppHeader(
-                    title = if (model.connected) model.tvName else "Не подключен",
+                    title = if (model.connected) model.tvName else "Подключить ТВ",
                     actionIcon = Icons.Rounded.Tune,
                 ) { settings = true }
 
@@ -202,24 +203,24 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
         var address by remember { mutableStateOf(model.host) }
         RemoteDialog(
             onDismissRequest = { settings = false },
-            title = { Text("Телевизор") },
+            title = { Text(if (model.connected) "ТВ · ${model.tvName}" else "Подключить ТВ") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-                    Text(model.status, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    model.devices.forEach { (name, host) ->
-                        TextButton(
-                            onClick = {
-                                model.select(name, host)
-                                settings = false
-                            },
-                            enabled = !model.busy,
-                        ) {
-                            Text("$name\n$host")
+                if (model.connected) {
+                    DialogActionGroup {
+                        DialogActionRow("Входы / HDMI") {
+                            model.key(178)
+                            settings = false
                         }
                     }
-                    if (model.devices.isEmpty()) {
-                        Text("Ищем телевизоры…", fontSize = 13.sp)
-                    }
+                } else Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
+                    if (model.devices.isNotEmpty()) DialogActionGroup {
+                        model.devices.forEach { (name, host) ->
+                            DialogActionRow(name, selected = host == model.host, enabled = !model.busy) {
+                                model.select(name, host)
+                                settings = false
+                            }
+                        }
+                    } else Text("Ищем телевизоры…", fontSize = 13.sp)
                     OutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
@@ -227,32 +228,24 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    TextButton(onClick = { model.key(178) }) { Text("Входы / HDMI") }
-                    TextButton(onClick = { model.key(166) }) { Text("Следующий канал") }
-                    TextButton(onClick = { model.key(167) }) { Text("Предыдущий канал") }
-                    TextButton(onClick = { model.key(223) }) { Text("Выключить по Wi-Fi") }
-                    Text(
-                        text = "ИК-передатчик: ${if (model.hasIr) "доступен" else "не найден"}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                    )
                 }
             },
             confirmButton = {
-                TextButton(
+                if (model.connected) TextButton(onClick = { settings = false }) { Text("Готово") }
+                else TextButton(
                     onClick = {
-                        model.select("Haier S2 Pro", address)
+                        model.selectAddress(address)
                         settings = false
                     },
                     enabled = address.isNotBlank() && !model.busy,
-                ) {
-                    Text("Сопряжение")
-                }
+                ) { Text("Подключить") }
             },
             dismissButton = {
-                TextButton(onClick = { settings = false }) {
-                    Text("Закрыть")
-                }
+                if (model.host.isNotBlank()) TextButton(
+                    onClick = { model.forgetTv(); settings = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Забыть ТВ") }
+                else TextButton(onClick = { settings = false }) { Text("Закрыть") }
             },
         )
     }

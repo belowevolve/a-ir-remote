@@ -5,7 +5,7 @@ import org.junit.Test
 
 class IrSignalTest {
     @Test fun haierProfileEncodesNecAddressAndCommandWithComplements() {
-        val (frequency, pattern) = IrSignal.parse(IrSignal.haierPower())
+        val (frequency, pattern) = requireNotNull(IrSignal.powerFor("Haier Android TV PRO"))
         assertEquals(38000, frequency)
         assertEquals(67, pattern.size)
         assertArrayEquals(intArrayOf(9000, 4500), pattern.take(2).toIntArray())
@@ -14,6 +14,12 @@ class IrSignalTest {
         }
         assertEquals(listOf(4, 251, 8, 247), bytes)
         assertEquals(560, pattern.last())
+    }
+    @Test fun unknownTelevisionsDoNotReceiveAnotherModelsPowerCode() {
+        for (name in listOf("Телевизор", "Sony", "Haier S2 Pro", "Haier", "")) {
+            assertNull(IrSignal.powerFor(name))
+        }
+        assertNotNull(IrSignal.powerFor(" haier android tv pro "))
     }
     @Test fun malformedAndOverlongSignalsAreRejected() {
         for (raw in listOf("", "38000 10", "0 1 2 3", "38000 -1 2 3", "38000 " + List(30) { "100000" }.joinToString(" "))) {

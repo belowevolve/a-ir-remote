@@ -58,3 +58,8 @@ internal object TvLayout {
     val DpadBorder = 1.dp
     val ConfirmSize = 84.dp
 }
+
+internal object DialogActionLayout {
+    val Radius = 18.dp
+    val Shape = RoundedCornerShape(Radius)
+}

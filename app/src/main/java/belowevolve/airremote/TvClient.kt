@@ -82,7 +82,7 @@ class TvClient(private val identity: TvIdentity) {
         }
         hash.update(code.substring(2).chunked(2).map { it.toInt(16).toByte() }.toByteArray())
         val digest = hash.digest()
-        require((digest[0].toInt() and 255) == code.substring(0, 2).toInt(16)) { "Код не совпадает. Проверьте экран ТВ." }
+        require((digest[0].toInt() and 255) == code.substring(0, 2).toInt(16)) { "Неверный код подключения" }
         check(exchange(s, pairMessage().setSecret(Secret.newBuilder().setSecret(ByteString.copyFrom(digest))).build()).hasSecretAck())
         identity.pin(pairingHost, server)
         cancelPairing()

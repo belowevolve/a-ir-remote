@@ -69,6 +69,10 @@ class TvIdentity(context: Context) {
 
     fun hasPin(host: String): Boolean = prefs.contains(host)
 
+    fun forget(host: String) {
+        prefs.edit { remove(host); remove("$host:identity") }
+    }
+
     private fun fingerprint(cert: X509Certificate): String =
         MessageDigest.getInstance("SHA-256")
             .digest(cert.encoded)

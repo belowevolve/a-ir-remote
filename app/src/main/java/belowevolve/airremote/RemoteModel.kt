@@ -34,7 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class RemoteModel(app: Application) : AndroidViewModel(app) {
-    var status by mutableStateOf(value = "Выберите телевизор")
+    var status by mutableStateOf(value = "ТВ не выбран")
     var connected by mutableStateOf(value = false)
     var pairing by mutableStateOf(value = false)
     var busy by mutableStateOf(value = false)
@@ -63,11 +63,15 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     val devices = mutableStateListOf<Pair<String, String>>()
     private val prefs = app.getSharedPreferences("remote", Context.MODE_PRIVATE)
     var host by mutableStateOf(value = prefs.getString("host", "")!!)
-    var tvName by mutableStateOf(value = prefs.getString("name", "Haier S2 Pro")!!)
-    private val powerSignal by lazy {
-        IrSignal.parse(prefs.getString("ir", null)?.takeIf { it.isNotBlank() } ?: IrSignal.haierPower())
-    }
-    
+    var tvName by mutableStateOf(value = prefs.getString("name", null)?.takeUnless { it == "Haier S2 Pro" } ?: "Телевизор")
+    private val powerSignal: Pair<Int, IntArray>?
+        get() {
+            val custom = prefs.getString("ir", null)?.takeIf {
+                it.isNotBlank() && prefs.getString("ir_host", null) == host
+            }
+            return custom?.let { runCatching { IrSignal.parse(it) }.getOrNull() } ?: IrSignal.powerFor(tvName)
+        }
+
     private val ir = app.getSystemService(ConsumerIrManager::class.java)
     val hasIr = ir?.hasIrEmitter() == true
     
@@ -89,6 +93,9 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private var initialized = false
 
     init {
+        if (host.isNotBlank() && prefs.contains("ir") && !prefs.contains("ir_host")) {
+            prefs.edit { putString("ir_host", host) }
+        }
         viewModelScope.launch {
             for (command in commands) {
                 if (!connected || (command.generation != connectionGeneration)) continue
@@ -139,7 +146,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun showKeyboard() {
         if (!connected) {
-            message = "Сначала подключите ТВ"
+            message = "ТВ не подключён"
             connect()
             return
         }
@@ -180,7 +187,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun resume() {
         foreground = true
         discover()
-        if (host.isNotBlank()) connect()
+        if (host.isNotBlank() && prefs.getBoolean("auto_connect", true)) connect()
     }
 
     fun pause() {
@@ -222,6 +229,10 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                             viewModelScope.launch {
                                 if (discovery === owner && devices.none { it.second == address }) {
                                     devices.add(info.serviceName to address)
+                                    if (host == address && tvName != info.serviceName) {
+                                        tvName = info.serviceName
+                                        prefs.edit { putString("name", tvName) }
+                                    }
                                 }
                             }
                         }
@@ -238,14 +249,32 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         discovery = null
     }
 
+    fun selectAddress(address: String) {
+        val target = address.trim()
+        val name = devices.firstOrNull { it.second == target }?.first
+            ?: if (target == host) tvName else "Телевизор"
+        select(name, target)
+    }
+
     fun select(name: String, address: String) {
+        if (busy) return
+        disconnect()
         host = address.trim()
         tvName = name
         prefs.edit {
             putString("host", host)
             putString("name", tvName)
         }
-        beginPairing()
+        val target = host
+        val generation = connectionGeneration
+        action {
+            val paired = identity.hasPin(target)
+            withContext(Dispatchers.Main) {
+                if (generation == connectionGeneration && host == target) {
+                    if (paired) connect() else beginPairing(target)
+                }
+            }
+        }
     }
 
     private fun action(block: suspend () -> Unit) = viewModelScope.launch {
@@ -308,7 +337,36 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun disconnect() {
+        prefs.edit { putBoolean("auto_connect", false) }
+        connectionJob?.cancel()
+        connectionJob = null
+        resetConnectionState()
+        if (initialized) client.close()
+        connected = false
+        status = "ТВ отключён"
+    }
+
+    fun forgetTv() {
+        val previousHost = host
+        disconnect()
+        if (previousHost.isNotBlank()) identity.forget(previousHost)
+        prefs.edit {
+            remove("host")
+            remove("name")
+            if (prefs.getString("ir_host", null) == previousHost) {
+                remove("ir")
+                remove("ir_host")
+            }
+        }
+        host = ""
+        tvName = "Телевизор"
+        message = ""
+        status = "ТВ не выбран"
+    }
+
     fun connect(wake: Boolean = false) {
+        prefs.edit { putBoolean("auto_connect", true) }
         if (wake && foreground) {
             connectionJob?.cancel()
             connectionJob = null
@@ -375,9 +433,9 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                     Log.w("AirRemote", "TV disconnected", e)
                     connected = false
                     resetConnectionState()
-                    status = "ТВ недоступен · ИК работает отдельно"
+                    status = "ТВ недоступен"
                     if (wakePending && android.os.SystemClock.elapsedRealtime() >= wakeDeadline) {
-                        message = "ТВ не ответил. Проверь сетевой режим ожидания в настройках телевизора"
+                        message = "ТВ не отвечает. Сетевой режим ожидания может быть отключён"
                         break
                     }
                 }
@@ -399,7 +457,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (connected) {
             enqueue { key(code) }
         } else {
-            message = "Сначала подключите ТВ"
+            message = "ТВ не подключён"
             connect()
         }
     }
@@ -408,12 +466,12 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (connected) {
             enqueue { launchYouTube() }
         } else {
-            message = "Сначала подключите ТВ"
+            message = "ТВ не подключён"
         }
     }
 
     fun holdPower(pressed: Boolean) {
-        if (hasIr) {
+        if (hasIr && powerSignal != null) {
             // One power signal after the long-press threshold, never repeated toggles.
             if (pressed) powerIr()
             return
@@ -434,17 +492,15 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun power() {
-        if (hasIr) { powerIr(); return }
+        if (hasIr && powerSignal != null) { powerIr(); return }
         if (connected) { key(26); return }
         connect(wake = true)
     }
 
     fun powerIr() {
         if (!hasIr) return
-        action {
-            val signal = powerSignal
-            ir.transmit(signal.first, signal.second)
-        }
+        val signal = powerSignal ?: return
+        action { ir.transmit(signal.first, signal.second) }
     }
 
     fun startVoice() {
@@ -454,7 +510,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (!connected) {
-            message = "Сначала подключите ТВ"
+            message = "ТВ не подключён"
             return
         }
         if (!voiceRequested) {
