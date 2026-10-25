@@ -54,74 +54,73 @@ internal fun PcScreen(model: PcRemoteModel, landscape: Boolean = false) {
         catch (_: android.content.ActivityNotFoundException) { launchError = "Открой настройки Bluetooth телефона вручную" }
         catch (_: SecurityException) { model.permissionDenied() }
     }
-    PcPointerSurface(model) { trackpadArea ->
+    val trackpadVisible = !landscape || !keyboardVisible
+    PcPointerSurface(model, trackpadVisible) { trackpadArea ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val fullscreenKeyboard = landscape && keyboardVisible
-            val keyHeight = if (fullscreenKeyboard) (maxHeight - KeyboardLayout.RowGap * (KeyboardLayout.ROW_COUNT - 1)) / KeyboardLayout.ROW_COUNT else KeyboardLayout.keyHeight(maxHeight)
+            val keyHeight = if (landscape) (maxHeight - KeyboardLayout.RowGap * (KeyboardLayout.ROW_COUNT - 1)) / KeyboardLayout.ROW_COUNT else KeyboardLayout.keyHeight(maxHeight)
             val toolbarSize = minOf(KeyboardLayout.ToolbarSize, keyHeight)
             val toolbar: @Composable () -> Unit = {
-                Column(Modifier.width(KeyboardLayout.ToolbarSize * 4), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
-                        listOf(false, true).forEach { right ->
-                            Surface(
-                                onClick = { model.click(right) },
-                                enabled = model.connected,
-                                modifier = Modifier.weight(1f).height(keyHeight),
-                                shape = KeyboardLayout.KeyShape,
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        painterResource(if (right) R.drawable.ic_mouse_right else R.drawable.ic_mouse_left),
-                                        if (right) "Правая кнопка мыши" else "Левая кнопка мыши",
-                                        Modifier.size(RemoteLayout.ActionIconSize),
-                                    )
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                    Column(Modifier.width(KeyboardLayout.ToolbarSize * 4), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
+                            listOf(false, true).forEach { right ->
+                                Surface(
+                                    onClick = { model.click(right) },
+                                    enabled = model.connected,
+                                    modifier = Modifier.weight(1f).height(keyHeight),
+                                    shape = KeyboardLayout.KeyShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            painterResource(if (right) R.drawable.ic_mouse_right else R.drawable.ic_mouse_left),
+                                            if (right) "Правая кнопка мыши" else "Левая кнопка мыши",
+                                            Modifier.size(RemoteLayout.ActionIconSize),
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                    Row(Modifier.height(keyHeight), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.size(toolbarSize).clip(CircleShape)
-                                .combinedClickable(
-                                    role = Role.Button,
-                                    onClickLabel = "Сменить язык ПК и подписи клавиш",
-                                    onClick = model::switchLanguage,
-                                    onDoubleClick = model::toggleKeyboardLayout,
-                                )
-                                .semantics {
-                                    customActions = listOf(CustomAccessibilityAction("Сменить только подписи клавиш") {
-                                        model.toggleKeyboardLayout()
-                                        true
-                                    })
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Rounded.Language, if (russian) "Язык: русский" else "Язык: английский")
-                        }
-                        IconToggleButton(
-                            checked = numpad,
-                            onCheckedChange = { numpad = it; keyboardVisible = true },
-                            modifier = Modifier.size(toolbarSize),
-                        ) {
-                            Icon(if (numpad) Icons.Rounded.Keyboard else Icons.Rounded.Dialpad,
-                                if (numpad) "Показать буквенную клавиатуру" else "Показать нумпад и дополнительные клавиши")
-                        }
-                        IconButton(onClick = { keyboardVisible = !keyboardVisible }, modifier = Modifier.size(toolbarSize)) {
-                            Icon(if (keyboardVisible) Icons.Rounded.KeyboardHide else Icons.Rounded.Keyboard,
-                                if (keyboardVisible) "Скрыть клавиатуру" else "Показать клавиатуру")
-                        }
-                        IconButton(onClick = { settingsVisible = true }, modifier = Modifier.size(toolbarSize)) {
-                            Icon(Icons.Rounded.Tune, "Настройки")
+                        Row(Modifier.height(keyHeight), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(toolbarSize).clip(CircleShape)
+                                    .combinedClickable(
+                                        role = Role.Button,
+                                        onClickLabel = "Сменить язык ПК и подписи клавиш",
+                                        onClick = model::switchLanguage,
+                                        onDoubleClick = model::toggleKeyboardLayout,
+                                    )
+                                    .semantics {
+                                        customActions = listOf(CustomAccessibilityAction("Сменить только подписи клавиш") {
+                                            model.toggleKeyboardLayout()
+                                            true
+                                        })
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Rounded.Language, if (russian) "Язык: русский" else "Язык: английский")
+                            }
+                            IconToggleButton(
+                                checked = numpad,
+                                onCheckedChange = { numpad = it; keyboardVisible = true },
+                                modifier = Modifier.size(toolbarSize),
+                            ) {
+                                Icon(if (numpad) Icons.Rounded.Keyboard else Icons.Rounded.Dialpad,
+                                    if (numpad) "Показать буквенную клавиатуру" else "Показать нумпад и дополнительные клавиши")
+                            }
+                            IconButton(onClick = { keyboardVisible = !keyboardVisible }, modifier = Modifier.size(toolbarSize)) {
+                                Icon(if (keyboardVisible) Icons.Rounded.KeyboardHide else Icons.Rounded.Keyboard,
+                                    if (keyboardVisible) "Скрыть клавиатуру" else "Показать клавиатуру")
+                            }
+                            IconButton(onClick = { settingsVisible = true }, modifier = Modifier.size(toolbarSize)) {
+                                Icon(Icons.Rounded.Tune, "Настройки")
+                            }
                         }
                     }
                 }
             }
-            Column(
-                Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
-            ) {
-                if (!fullscreenKeyboard) Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
+            Column(Modifier.fillMaxSize()) {
+                if (!landscape) Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
                     AppHeader(if (model.connected) model.deviceName else "Подключить ПК",
                         onAction = {
                         devicesVisible = true
@@ -129,11 +128,15 @@ internal fun PcScreen(model: PcRemoteModel, landscape: Boolean = false) {
                     }, actionIcon = Icons.Rounded.Devices,
                         actionDescription = if (model.connected) "Устройства" else "Подключить")
                 }
-                if (!fullscreenKeyboard) Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding).weight(1f)) {
-                    Trackpad(trackpadArea.fillMaxSize())
+                if (!landscape) Spacer(Modifier.height(RemoteLayout.SmallGap))
+                if (trackpadVisible) {
+                    Box(Modifier.padding(horizontal = if (landscape) KeyboardLayout.EdgePadding else RemoteLayout.ScreenPadding).weight(1f)) {
+                        Trackpad(trackpadArea.fillMaxSize())
+                    }
+                    Spacer(Modifier.height(KeyboardLayout.RowGap))
                 }
                 if (keyboardVisible) {
-                    PcKeyboard(model, russian, keyHeight, numpad, landscape = fullscreenKeyboard, toolbar = toolbar)
+                    PcKeyboard(model, russian, keyHeight, numpad, landscape = landscape, toolbar = toolbar)
                 } else {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { toolbar() }
                 }

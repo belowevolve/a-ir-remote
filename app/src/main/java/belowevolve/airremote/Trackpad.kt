@@ -24,21 +24,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun PcPointerSurface(model: PcRemoteModel, content: @Composable (Modifier) -> Unit) {
+internal fun PcPointerSurface(model: PcRemoteModel, trackpadVisible: Boolean, content: @Composable (Modifier) -> Unit) {
     var trackpadBounds by remember { mutableStateOf(Rect.Zero) }
     var origin by remember { mutableStateOf(Offset.Zero) }
     val scope = rememberCoroutineScope()
     var releaseJob by remember { mutableStateOf<Job?>(null) }
-    DisposableEffect(model) {
+    DisposableEffect(model, trackpadVisible) {
+        trackpadBounds = Rect.Zero
         onDispose { releaseJob?.cancel(); model.dragButton(pressed = false) }
     }
     Box(
         modifier = Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }
-            .pointerInput(model.connected) {
+            .pointerInput(model.connected, trackpadVisible) {
                 if (!model.connected) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    val onTrackpad = trackpadBounds.contains(down.position + origin)
+                    val onTrackpad = trackpadVisible && trackpadBounds.contains(down.position + origin)
                     val continuingDrag = model.dragging
                     var captured = onTrackpad || continuingDrag
                     if (captured) down.consume()
