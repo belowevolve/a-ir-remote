@@ -47,6 +47,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.sp
@@ -257,10 +259,12 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
 
     if (model.pairing) {
         var pin by remember { mutableStateOf("") }
+        val pinFocus = remember { FocusRequester() }
         RemoteDialog(
             onDismissRequest = { model.cancelPairing() },
             title = { Text("Код на телевизоре") },
             text = {
+                LaunchedEffect(Unit) { pinFocus.requestFocus() }
                 OutlinedTextField(
                     value = pin,
                     onValueChange = { newValue ->
@@ -270,7 +274,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     },
                     label = { Text("6 символов") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(pinFocus),
                 )
             },
             confirmButton = {

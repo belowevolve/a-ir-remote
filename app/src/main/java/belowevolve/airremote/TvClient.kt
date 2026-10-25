@@ -15,6 +15,7 @@ import kotlinx.coroutines.*
 import kotlin.coroutines.EmptyCoroutineContext
 
 private const val IME_TAG = "AirRemoteIme"
+private const val TV_TAG = "AirRemoteTv"
 
 class TvClient(private val identity: TvIdentity) {
     @Volatile private var socket: SSLSocket? = null
@@ -25,7 +26,7 @@ class TvClient(private val identity: TvIdentity) {
     private val writeLock = Any()
     private val connectionLock = Any()
     private val connectingSockets = mutableSetOf<SSLSocket>()
-    private val remotePorts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val remotePorts = TvConnectionPorts()
     private var connectionVersion = 0L
     private val keyboard = TvKeyboard()
     
@@ -102,17 +103,21 @@ class TvClient(private val identity: TvIdentity) {
     
     fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, onVoiceRequest: (Boolean) -> Unit, ready: (Boolean) -> Unit) {
         val version = synchronized(connectionLock) { connectionVersion }
-        // Newer Google TV services expose the same authenticated protocol on a
-        // standby-allowed wake port. Older TVs only have the regular remote port.
-        // Connecting here keeps the remote reachable in standby; it does not
-        // turn on the screen. Remember the working port for older televisions.
-        val preferredPort = remotePorts[host] ?: 6465
-        val s = try {
-            open(host, preferredPort, pairing = false, version = version).also { remotePorts[host] = preferredPort }
-        } catch (_: java.io.IOException) {
-            val fallbackPort = if (preferredPort == 6465) 6466 else 6465
-            open(host, fallbackPort, pairing = false, version = version).also { remotePorts[host] = fallbackPort }
+        remotePorts.connect(host) { port, established ->
+            listenPort(host, port, version, onKeyboard, onVoiceRequest) { powered ->
+                established()
+                ready(powered)
+            }
         }
+    }
+
+    private fun listenPort(
+        host: String, port: Int, version: Long,
+        onKeyboard: (KeyboardUpdate) -> Unit, onVoiceRequest: (Boolean) -> Unit,
+        ready: (Boolean) -> Unit,
+    ) {
+        val s = open(host, port, pairing = false, version = version)
+        if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Connected port=$port")
         try {
             synchronized(connectionLock) {
                 if (version != connectionVersion) throw CancellationException("Соединение отменено")
@@ -157,6 +162,7 @@ class TvClient(private val identity: TvIdentity) {
                     msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
                     msg.hasRemoteStart() -> {
+                        if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power port=$port on=${msg.remoteStart.started}")
                         // Only an established session may wait for a slow heartbeat.
                         s.soTimeout = 65000
                         ready(msg.remoteStart.started)
@@ -205,7 +211,10 @@ class TvClient(private val identity: TvIdentity) {
         }
     }
     
-    fun key(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) = send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
+    fun key(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) {
+        if (code == 26 && Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power key port=${socket?.port} direction=$direction")
+        send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
+    }
     
     fun launchYouTube() {
         check((features and 512) != 0) { "ТВ не поддерживает запуск приложений по сети" }

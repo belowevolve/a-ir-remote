@@ -55,7 +55,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private var keyboardEpoch = 0L
     private var keyboardRevision = 0L
     private var connectionGeneration = 0L
-    private var tvPowered: Boolean? = null
     private var networkPowerHeld = false
 
     private data class TvCommand(val generation: Long, val action: TvClient.() -> Unit)
@@ -110,7 +109,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     private fun resetConnectionState() {
         connectionGeneration++
-        tvPowered = null
         networkPowerHeld = false
         voiceRequested = false
         stopVoice()
@@ -304,7 +302,10 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelPairing() {
         pairing = false
-        action { client.cancelPairing() }
+        action {
+            client.cancelPairing()
+            withContext(Dispatchers.Main) { connect() }
+        }
     }
 
     fun connect(wake: Boolean = false) {
@@ -355,7 +356,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                             viewModelScope.launch {
                                 if (foreground && generation == connectionGeneration) {
                                     connected = true
-                                    tvPowered = powered
                                     status = "Подключён по Wi-Fi"
                                     if (wakePending) {
                                         wakePending = false
@@ -369,6 +369,9 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
+                    // Closing an old socket can surface as IOException after a new
+                    // connection has started. Its result must not reset the new session.
+                    if (!currentCoroutineContext().isActive || generation != connectionGeneration) return@launch
                     Log.w("AirRemote", "TV disconnected", e)
                     connected = false
                     resetConnectionState()
@@ -422,7 +425,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             }
             return
         }
-        if (!connected || tvPowered == false) {
+        if (!connected) {
             connect(wake = true)
             return
         }
@@ -432,7 +435,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun power() {
         if (hasIr) { powerIr(); return }
-        if (connected && tvPowered != false) { key(26); return }
+        if (connected) { key(26); return }
         connect(wake = true)
     }
 
