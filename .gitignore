@@ -7,3 +7,6 @@ local.properties
 artifacts/
 .DS_Store
 .signing/
+
+# Rust companion
+companion/target/
