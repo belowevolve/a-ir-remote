@@ -10,12 +10,11 @@ import androidx.core.content.edit
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.MicOff
 import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -26,38 +25,34 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.input.KeyboardType
 import kotlin.math.sqrt
 
 @Composable
-fun MicrophoneScreen(beforeStart: () -> Unit) {
+fun MicrophoneScreen(model: PcRemoteModel, beforeStart: () -> Unit) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("microphone", Context.MODE_PRIVATE) }
-    var host by rememberSaveable { mutableStateOf(preferences.getString("host", "").orEmpty()) }
-    var port by rememberSaveable { mutableStateOf(preferences.getString("port", "54345").orEmpty()) }
+    val companion = if (model.hasCompanion) CompanionEndpoint.load(context) else null
+    var pairing by rememberSaveable { mutableStateOf(false) }
     var natural by rememberSaveable { mutableStateOf(!preferences.getBoolean("speech", true)) }
     var error by rememberSaveable { mutableStateOf("") }
     val state by MicrophoneService.status.collectAsState()
-    val uri = LocalUriHandler.current
+    if (pairing) CompanionDialog(model) { pairing = false }
     fun start() {
-        val number = port.toIntOrNull()
-        val address = host.trim()
-        try { lanAddress(address) }
-        catch (e: IllegalArgumentException) { error = e.message.orEmpty(); return }
-        if (number == null || (number !in 1..65535)) { error = "Порт должен быть от 1 до 65535"; return }
+        if (companion == null) { pairing = true; return }
         try {
             beforeStart()
-            MicrophoneService.start(context, address, number, natural)
-            preferences.edit { putString("host", address); putString("port", port); putBoolean("speech", !natural) }
+            MicrophoneService.start(context, natural)
+            preferences.edit {
+                putBoolean("speech", !natural)
+            }
             error = ""
         } catch (e: Exception) { error = e.message ?: "Не удалось запустить трансляцию" }
     }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            error = "Для трансляции разреши доступ к микрофону в настройках приложения"
+            error = "Нет доступа к микрофону"
         } else if (Build.VERSION.SDK_INT >= 37 && context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
-            error = "Разреши доступ к устройствам поблизости для подключения к ПК"
+            error = "Нет доступа к устройствам поблизости"
         } else {
             start()
         }
@@ -69,48 +64,25 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
     ) {
         AppHeader(
-            title = when {
-                state.streaming -> host
-                state.active -> "Подключение…"
-                else -> "Не подключен"
-            },
-            actionIcon = Icons.AutoMirrored.Outlined.HelpOutline,
-            actionDescription = "Как подключить микрофон",
-        ) {
-            uri.openUri("https://github.com/belowevolve/a-ir-remote/blob/master/README.md#настройка")
-        }
-        OutlinedTextField(
-            value = host,
-            onValueChange = { host = it },
-            label = { Text("IP-адрес ПК") },
-            placeholder = { Text("192.168.1.20") },
-            enabled = !state.active,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.fillMaxWidth(),
+            title = companion?.host ?: "Микрофон",
+            actionIcon = Icons.Rounded.Devices,
+            actionDescription = "Подключить ПК",
+            onAction = { pairing = true },
         )
-        OutlinedTextField(
-            value = port,
-            onValueChange = { port = it },
-            label = { Text("Порт") },
-            enabled = !state.active,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-            FilterChip(
-                selected = !natural,
-                onClick = { natural = false; preferences.edit { putBoolean("speech", true) } },
-                enabled = !state.active,
-                label = { Text("Речь") },
-            )
-            FilterChip(
-                selected = natural,
-                onClick = { natural = true; preferences.edit { putBoolean("speech", false) } },
-                enabled = !state.active,
-                label = { Text("Естественный звук") },
-            )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().height(RemoteLayout.TabHeight)) {
+            listOf("Речь", "Естественный звук").forEachIndexed { index, label ->
+                SegmentedButton(
+                    modifier = Modifier.height(RemoteLayout.TabHeight),
+                    selected = natural == (index == 1),
+                    onClick = {
+                        natural = index == 1
+                        preferences.edit { putBoolean("speech", !natural) }
+                    },
+                    enabled = !state.active,
+                    shape = SegmentedButtonDefaults.itemShape(index, 2),
+                    label = { Text(label) },
+                )
+            }
         }
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (!state.active && state.message !in listOf("Готов к подключению", "Трансляция остановлена")) {
@@ -129,13 +101,14 @@ fun MicrophoneScreen(beforeStart: () -> Unit) {
                     shape = RemoteLayout.ActionShape,
                     enabled = !state.active,
                     onClick = {
+                        if (companion == null) { pairing = true; return@Button }
                         permissions.launch(buildList {
                             add(Manifest.permission.RECORD_AUDIO)
                             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
                             if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
                         }.toTypedArray())
                     },
-                ) { Text(if (state.active) "Подключение…" else "Подключить") }
+                ) { Text(if (state.active) "Подключение…" else if (companion == null) "Подключить ПК" else "Включить микрофон") }
             }
             if (state.active) {
                 RemoteButton(

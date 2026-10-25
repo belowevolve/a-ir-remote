@@ -3,7 +3,7 @@ package belowevolve.airremote.mic;
 option java_package = "belowevolve.airremote.mic";
 option java_outer_classname = "MicrophoneProtocol";
 
-// Wire-compatible with AndroidMic's AudioPacketMessage (TCP).
+// Audio frames sent over the authenticated microphone connection.
 message AudioPacket {
   bytes buffer = 1;
   uint32 sample_rate = 2;

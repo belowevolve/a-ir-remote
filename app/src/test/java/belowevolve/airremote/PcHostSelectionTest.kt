@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PcHostSelectionTest {
+    @Test fun forgettingClearsSelectionAndRejectsLateReconnects() {
+        val selection = PcHostSelection("A", true)
+        selection.forget()
+        assertNull(selection.address)
+        assertFalse(selection.allowed)
+        assertFalse(selection.accepts("A"))
+        assertFalse(selection.accepts("B"))
+        val restored = PcHostSelection(selection.address, selection.allowed)
+        assertFalse(restored.accepts("A"))
+        restored.select("A")
+        assertTrue(restored.accepts("A"))
+    }
+
     @Test fun manualDisconnectRejectsReconnectUntilUserSelectsHost() {
         val selection = PcHostSelection("A", true)
         selection.disconnect()

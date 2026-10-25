@@ -32,7 +32,7 @@ private val numpadRows = listOf(
 )
 
 @Composable
-internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = KeyboardLayout.KeyHeight, numpad: Boolean = false, toolbar: @Composable () -> Unit = {}) {
+internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = KeyboardLayout.KeyHeight, numpad: Boolean = false, landscape: Boolean = false, toolbar: @Composable () -> Unit = {}) {
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp, LocalKeyHeight provides keyHeight) {
         Column(Modifier.fillMaxWidth().padding(horizontal = KeyboardLayout.EdgePadding), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
             (if (numpad) numpadRows else keyboardRows).forEach { row ->
@@ -54,24 +54,28 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
                 listOf("Ctrl" to 1, "Win" to 8, "Alt" to 4).forEach { (label, mask) ->
                     PcKey(
                         label = label,
-                        modifier = Modifier.weight(1f),
+                        modifier = if (landscape) Modifier.width(56.dp) else Modifier.weight(1f),
                         enabled = model.connected,
                         selected = (model.modifiers and mask) != 0,
                     ) { model.toggleModifier(mask) }
                 }
-                PcKey("Space", Modifier.weight(2.5f), model.connected) { model.key(44) }
+                PcKey("Space", Modifier.weight(if (landscape) 1f else 2.5f), model.connected) { model.key(44) }
                 listOf("Home" to 74, "End" to 77).forEach { (label, code) ->
-                    PcKey(label, Modifier.weight(1f), model.connected) { model.key(code) }
+                    PcKey(label, if (landscape) Modifier.width(56.dp) else Modifier.weight(1f), model.connected) { model.key(code) }
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                PcKey("Win", Modifier.weight(1f), model.connected) { model.windowsKey() }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.BottomStart) {
+                    PcKey("Win", if (landscape) Modifier.width(56.dp) else Modifier.fillMaxWidth(), model.connected) { model.windowsKey() }
+                }
                 Box(Modifier.width(KeyboardLayout.ToolbarSize * 4), contentAlignment = Alignment.Center) { toolbar() }
-                Column(Modifier.weight(1.65f), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
-                    PcKey("↑", Modifier.align(Alignment.CenterHorizontally).width(KeyboardLayout.ArrowWidth), model.connected, repeatOnHold = true) { model.key(82) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
-                        listOf("←" to 80, "↓" to 81, "→" to 79).forEach { (label, code) ->
-                            PcKey(label, Modifier.weight(1f), model.connected, repeatOnHold = true) { model.key(code) }
+                Box(Modifier.weight(if (landscape) 1f else 1.65f), contentAlignment = Alignment.BottomEnd) {
+                    Column(if (landscape) Modifier.width(KeyboardLayout.ArrowWidth * 3 + KeyboardLayout.KeyGap * 2) else Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
+                        PcKey("↑", Modifier.align(Alignment.CenterHorizontally).width(KeyboardLayout.ArrowWidth), model.connected, repeatOnHold = true) { model.key(82) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
+                            listOf("←" to 80, "↓" to 81, "→" to 79).forEach { (label, code) ->
+                                PcKey(label, Modifier.weight(1f), model.connected, repeatOnHold = true) { model.key(code) }
+                            }
                         }
                     }
                 }

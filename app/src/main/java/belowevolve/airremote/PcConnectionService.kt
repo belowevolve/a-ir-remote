@@ -25,7 +25,7 @@ class PcConnectionService : Service() {
         val notification = Notification.Builder(this, channel)
             .setSmallIcon(R.drawable.ic_remote_monochrome)
             .setContentTitle("Пульт для ПК")
-            .setContentText("Bluetooth-соединение сохраняется при сворачивании")
+            .setContentText("Bluetooth")
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

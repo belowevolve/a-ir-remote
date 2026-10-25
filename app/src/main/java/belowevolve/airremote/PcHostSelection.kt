@@ -16,6 +16,11 @@ internal class PcHostSelection(var address: String?, var allowed: Boolean) {
         allowed = false
     }
 
+    fun forget() {
+        disconnect()
+        address = null
+    }
+
     fun pair() {
         address?.let(blocked::add)
         address = null

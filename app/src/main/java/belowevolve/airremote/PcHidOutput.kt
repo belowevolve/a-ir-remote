@@ -23,8 +23,8 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         // Keep press/release distinct, without blocking the UI thread.
         val start = maxOf(now, nextKeyAt)
         val epoch = generation
-        schedule(start - now, epoch) { transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard(code, modifiers)) }
-        schedule(start - now + TimeUnit.MILLISECONDS.toNanos(10), epoch) { transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard()) }
+        scheduleAt(start, epoch) { transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard(code, modifiers)) }
+        scheduleAt(start + TimeUnit.MILLISECONDS.toNanos(10), epoch) { transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard()) }
         nextKeyAt = start + TimeUnit.MILLISECONDS.toNanos(20)
         return true
     }
@@ -85,8 +85,8 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         val now = System.nanoTime()
         val start = maxOf(now, nextConsumerAt)
         val epoch = generation
-        schedule(start - now, epoch) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer(value == 1, value == 2, value == 3)) }
-        schedule(start - now + TimeUnit.MILLISECONDS.toNanos(10), epoch) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer()) }
+        scheduleAt(start, epoch) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer(value == 1, value == 2, value == 3)) }
+        scheduleAt(start + TimeUnit.MILLISECONDS.toNanos(10), epoch) { transmit(PcHidReports.CONSUMER, PcHidReports.consumer()) }
         nextConsumerAt = start + TimeUnit.MILLISECONDS.toNanos(20)
         return true
     }
@@ -112,6 +112,9 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         closed = true
         worker.shutdown()
     }
+
+    private fun scheduleAt(deadline: Long, epoch: Int, action: () -> Unit) =
+        schedule((deadline - System.nanoTime()).coerceAtLeast(0), epoch, action)
 
     private fun schedule(delay: Long, epoch: Int, action: () -> Unit) {
         worker.schedule(

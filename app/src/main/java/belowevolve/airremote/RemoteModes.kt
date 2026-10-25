@@ -1,5 +1,8 @@
 package belowevolve.airremote
 
+import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Surface
@@ -13,6 +16,8 @@ import kotlin.math.abs
 @Composable
 fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Boolean) -> Unit, tv: @Composable () -> Unit) {
     var mode by rememberSaveable { mutableIntStateOf(if (MicrophoneService.status.value.active) 2 else 0) }
+    val fullscreenPc = mode == 1 && LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    BackHandler(enabled = fullscreenPc) { mode = 0 }
     val pcMode = mode != 0
     DisposableEffect(pcMode) {
         onModeChanged(pcMode)
@@ -29,11 +34,11 @@ fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Bo
                 },
             ) { change, dx -> change.consume(); distance += dx }
         }) {
-            ModeTabs(mode, onSelected = { mode = it })
-            Box(Modifier.weight(1f).padding(vertical = RemoteLayout.SmallGap)) {
+            if (!fullscreenPc) ModeTabs(mode, onSelected = { mode = it })
+            Box(Modifier.weight(1f).padding(vertical = if (fullscreenPc) 0.dp else RemoteLayout.SmallGap)) {
                 when (mode) {
-                    1 -> PcScreen(pc)
-                    2 -> MicrophoneScreen(beforeStart = onPcActivated)
+                    1 -> PcScreen(pc, landscape = fullscreenPc)
+                    2 -> MicrophoneScreen(pc, beforeStart = onPcActivated)
                     else -> tv()
                 }
             }

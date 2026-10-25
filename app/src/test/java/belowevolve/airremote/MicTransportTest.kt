@@ -27,12 +27,12 @@ class MicTransportTest {
     }
 
     @Test fun readsFragmentedHandshakeFully() {
-        val input = object : ByteArrayInputStream("AndroidMic2".toByteArray()) {
+        val input = object : ByteArrayInputStream("AirRemoteA2".toByteArray()) {
             override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, minOf(len, 1))
         }
         val output = ByteArrayOutputStream()
         MicTransport.handshake(input, output)
-        assertEquals("AndroidMic1", output.toString("US-ASCII"))
+        assertEquals("AirRemoteA1", output.toString("US-ASCII"))
     }
 
     @Test(expected = EOFException::class) fun rejectsTruncatedHandshake() {
@@ -62,8 +62,8 @@ class MicTransportTest {
                     val input = DataInputStream(peer.getInputStream())
                     val handshake = ByteArray(11)
                     input.readFully(handshake)
-                    assertEquals("AndroidMic1", String(handshake))
-                    peer.getOutputStream().write("AndroidMic2".toByteArray())
+                    assertEquals("AirRemoteA1", String(handshake))
+                    peer.getOutputStream().write("AirRemoteA2".toByteArray())
                     List(2) {
                         val bytes = ByteArray(input.readInt())
                         input.readFully(bytes)

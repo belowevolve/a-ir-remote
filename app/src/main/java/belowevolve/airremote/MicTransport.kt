@@ -9,7 +9,7 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** AndroidMic TCP: ASCII handshake, then big-endian length + protobuf containing LE PCM. */
+/** Air Remote audio: ASCII handshake, then big-endian length + protobuf containing LE PCM. */
 internal object MicTransport {
     const val RATE = 48_000
     const val QUEUED_FRAMES = 3
@@ -20,12 +20,12 @@ internal object MicTransport {
     const val SAMPLES = 480 // 10 ms; independent of the device's recording buffer size.
 
     fun handshake(input: InputStream, output: OutputStream) {
-        output.write("AndroidMic1".toByteArray(Charsets.US_ASCII))
+        output.write("AirRemoteA1".toByteArray(Charsets.US_ASCII))
         output.flush()
         val reply = ByteArray(11)
         DataInputStream(input).readFully(reply)
-        require(reply.contentEquals("AndroidMic2".toByteArray(Charsets.US_ASCII))) {
-            "ПК не подтвердил протокол AndroidMic"
+        require(reply.contentEquals("AirRemoteA2".toByteArray(Charsets.US_ASCII))) {
+            "ПК не подтвердил протокол Air Remote"
         }
     }
 

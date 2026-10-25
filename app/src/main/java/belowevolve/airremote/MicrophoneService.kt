@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.*
+import android.media.audiofx.NoiseSuppressor
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.*
@@ -16,7 +17,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
@@ -38,16 +38,15 @@ class MicrophoneService : Service() {
     companion object {
         private val mutableStatus = MutableStateFlow(MicStatus())
         internal val status = mutableStatus.asStateFlow()
+        private const val LOG_TAG = "AirRemoteMic"
         private const val STOP = BuildConfig.APPLICATION_ID + ".MIC_STOP"
         private const val MUTE = BuildConfig.APPLICATION_ID + ".MIC_MUTE"
         private const val CHANNEL = "microphone"
         private const val NOTIFICATION = 48
 
-        fun start(context: Context, host: String, port: Int, natural: Boolean) {
+        fun start(context: Context, natural: Boolean) {
             context.startForegroundService(
                 Intent(context, MicrophoneService::class.java)
-                    .putExtra("host", host)
-                    .putExtra("port", port)
                     .putExtra("natural", natural),
             )
         }
@@ -82,7 +81,7 @@ class MicrophoneService : Service() {
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
         try {
             check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                "Разреши доступ к микрофону"
+                "Нет доступа к микрофону"
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL, "Микрофон для ПК", NotificationManager.IMPORTANCE_LOW))
@@ -100,12 +99,11 @@ class MicrophoneService : Service() {
                     withContext(Dispatchers.Main) { if (!destroyed) wakeLock?.acquire(10 * 60 * 1000L) }
                 }
             }
-            val host = intent.getStringExtra("host").orEmpty()
-            val port = intent.getIntExtra("port", 54345)
+            val endpoint = CompanionEndpoint.load(this) ?: error("ПК не подключён по Wi-Fi")
             val natural = intent.getBooleanExtra("natural", true)
             session = scope.launch {
                 var failure: String? = null
-                try { stream(host, port, natural) }
+                try { stream(endpoint, natural) }
                 catch (_: CancellationException) { }
                 catch (e: Exception) { failure = streamFailure ?: e.message ?: "Соединение прервано" }
                 finally {
@@ -126,24 +124,21 @@ class MicrophoneService : Service() {
         return START_NOT_STICKY
     }
 
-    private suspend fun stream(host: String, port: Int, natural: Boolean) = coroutineScope {
-        require(port in (1..65535)) { "Порт должен быть от 1 до 65535" }
-        val address = lanAddress(host)
+    private suspend fun stream(endpoint: CompanionEndpoint, natural: Boolean) = coroutineScope {
+        val host = endpoint.host
+        val port = endpoint.port
         if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED)
-            throw SecurityException("Разреши доступ к устройствам поблизости")
+            throw SecurityException("Нет доступа к устройствам поблизости")
         val cm = getSystemService(ConnectivityManager::class.java)
         val network = cm.activeNetwork
         require(network != null && cm.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
-            "Подключи телефон к Wi-Fi в одной сети с ПК (без VPN)"
+            "Нет подключения к локальной сети Wi-Fi"
         }
-        val connection = Socket()
-        socket = connection
+        val connection = endpoint.open(network, "audio") { pending ->
+            socket = pending
+            if (destroyed) { pending.close(); throw CancellationException() }
+        }
         ensureActive()
-        network.bindSocket(connection)
-        connection.tcpNoDelay = true
-        connection.sendBufferSize = 4096
-        connection.soTimeout = 3000
-        connection.connect(InetSocketAddress(address, port), 3000)
         MicTransport.handshake(connection.getInputStream(), connection.getOutputStream())
         ensureActive()
         val audioManager = getSystemService(AudioManager::class.java)
@@ -152,6 +147,10 @@ class MicrophoneService : Service() {
             else if (natural) MediaRecorder.AudioSource.VOICE_RECOGNITION else MediaRecorder.AudioSource.VOICE_COMMUNICATION
         val (record, floatPcm) = createRecorder(source)
         recorder = record
+        val suppressor = if (!natural && NoiseSuppressor.isAvailable()) runCatching {
+            NoiseSuppressor.create(record.audioSessionId)
+        }.getOrNull() else null
+        suppressor?.let { runCatching { it.enabled = true } }
         try {
             ensureActive()
             // Initialize protobuf/PCM serialization before the hardware starts accumulating audio.
@@ -160,8 +159,9 @@ class MicrophoneService : Service() {
             audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
                 it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
             }?.let { record.setPreferredDevice(it) }
+            val diagnostics = BuildConfig.DEBUG || Log.isLoggable(LOG_TAG, Log.DEBUG)
             val frames = Channel<CapturedFrame>(capacity = MicTransport.QUEUED_FRAMES)
-            if (BuildConfig.DEBUG) Log.d("AirRemoteMic", "captureBufferMs=${record.bufferSizeInFrames * 1000 / MicTransport.RATE} sendBufferBytes=${connection.sendBufferSize}")
+            if (diagnostics) Log.d(LOG_TAG, "captureBufferMs=${record.bufferSizeInFrames * 1000 / MicTransport.RATE} sendBufferBytes=${connection.sendBufferSize}")
             val started = SystemClock.elapsedRealtime()
             val progress = AtomicLong(started)
             // Socket SO_TIMEOUT only limits reads. Close a blocked writer explicitly.
@@ -170,10 +170,10 @@ class MicrophoneService : Service() {
                     delay(100.milliseconds)
                     if (SystemClock.elapsedRealtime() - progress.get() >=
                         (if (progress.get() == started) 1500 else 500)) {
-                        streamFailure = "Сеть или микрофон не отвечает. Подключись заново"
+                        streamFailure = "Сеть или микрофон не отвечает"
                         runCatching { connection.close() }
                         runCatching { record.stop() }
-                        frames.close(java.io.IOException("Сеть или микрофон не отвечает. Подключись заново"))
+                        frames.close(java.io.IOException(streamFailure))
                         break
                     }
                 }
@@ -184,6 +184,8 @@ class MicrophoneService : Service() {
                     Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
                     val shorts = ShortArray(MicTransport.SAMPLES)
                     var ticks = 0
+                    var framesRead = 0L
+                    val timestamp = if (diagnostics) AudioTimestamp() else null
                     record.startRecording()
                     check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Микрофон недоступен" }
                     mutableStatus.update { it.copy(streaming = true, message = "Передача на $host:$port",
@@ -197,9 +199,19 @@ class MicrophoneService : Service() {
                             ensureActive()
                             val count = if (floatPcm) record.read(samples, offset, samples.size - offset, AudioRecord.READ_BLOCKING)
                                 else record.read(shorts, offset, samples.size - offset, AudioRecord.READ_BLOCKING)
+                            // stop() unblocks read() with 0; preserve cancellation and the transport error.
+                            ensureActive()
                             check(count > 0) { "Ошибка чтения микрофона: $count" }
                             if (!floatPcm) for (i in offset until offset + count) samples[i] = shorts[i] / 32768f
                             offset += count
+                        }
+                        framesRead += samples.size
+                        if (timestamp != null && ticks % 100 == 99 &&
+                            record.getTimestamp(timestamp, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS) {
+                            // Estimate the age of the last sample using the capture clock, not read completion.
+                            val lastSampleNs = timestamp.nanoTime +
+                                (framesRead - timestamp.framePosition) * 1_000_000_000L / MicTransport.RATE
+                            Log.d(LOG_TAG, "captureAgeMs=${(System.nanoTime() - lastSampleNs) / 1_000_000.0}")
                         }
                         // Keep draining the hardware during mute; silence replaces the captured frame.
                         if (mutableStatus.value.muted) samples.fill(0f)
@@ -219,6 +231,7 @@ class MicrophoneService : Service() {
                 }
             }
             try {
+                var framesWritten = 0
                 for (frame in frames) {
                     ensureActive()
                     val writeStarted = System.nanoTime()
@@ -230,7 +243,10 @@ class MicrophoneService : Service() {
                     MicTransport.write(output, MicTransport.frame(samples, samples.size, mutableStatus.value.muted, floatPcm))
                     progress.set(SystemClock.elapsedRealtime())
                     val writeMs = (System.nanoTime() - writeStarted) / 1_000_000
-                    if (BuildConfig.DEBUG && writeMs >= 100) Log.d("AirRemoteMic", "slowWriteMs=$writeMs")
+                    if (diagnostics && (++framesWritten % 100 == 0 || writeMs >= 100)) {
+                        val queueMs = (writeStarted - frame.capturedAt) / 1_000_000.0
+                        Log.d(LOG_TAG, "queueMs=$queueMs writeMs=$writeMs dropped=${mutableStatus.value.dropped}")
+                    }
                 }
             } finally {
                 watchdog.cancel()
@@ -240,6 +256,7 @@ class MicrophoneService : Service() {
                 frames.cancel()
             }
         } finally {
+            suppressor?.release()
             recorder = null
             record.release()
         }
@@ -247,7 +264,7 @@ class MicrophoneService : Service() {
 
     private fun createRecorder(source: Int): Pair<AudioRecord, Boolean> {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
-            throw SecurityException("Разреши доступ к микрофону")
+            throw SecurityException("Нет доступа к микрофону")
         for (encoding in listOf(AudioFormat.ENCODING_PCM_FLOAT, AudioFormat.ENCODING_PCM_16BIT)) {
             val min = AudioRecord.getMinBufferSize(MicTransport.RATE, AudioFormat.CHANNEL_IN_MONO, encoding)
             if (min <= 0) continue
@@ -266,7 +283,7 @@ class MicrophoneService : Service() {
         val stop = PendingIntent.getService(this, 1, Intent(this, MicrophoneService::class.java).setAction(STOP), PendingIntent.FLAG_IMMUTABLE)
         val mute = PendingIntent.getService(this, 2, Intent(this, MicrophoneService::class.java).setAction(MUTE), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_remote_monochrome)
-            .setContentTitle("Микрофон для ПК").setContentText(if (status.value.muted) "Микрофон выключен" else status.value.message)
+            .setContentTitle("Микрофон для ПК").setContentText(if (status.value.muted) "Без звука" else if (status.value.streaming) "Передача звука" else "Подключение…")
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .addAction(Notification.Action.Builder(null, if (status.value.muted) "Включить звук" else "Без звука", mute).build())
             .addAction(Notification.Action.Builder(null, "Остановить", stop).build()).build()

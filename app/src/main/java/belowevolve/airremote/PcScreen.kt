@@ -27,15 +27,17 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalView
 
 @Composable
-internal fun PcScreen(model: PcRemoteModel) {
+internal fun PcScreen(model: PcRemoteModel, landscape: Boolean = false) {
     var devicesVisible by rememberSaveable { mutableStateOf(false) }
     var keyboardVisible by rememberSaveable { mutableStateOf(true) }
     var numpad by rememberSaveable { mutableStateOf(false) }
     val russian = model.russianLayout
     var launchError by remember { mutableStateOf("") }
+    var companionVisible by rememberSaveable { mutableStateOf(false) }
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
     val bluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { model.start(); model.refreshDevices() }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -54,7 +56,9 @@ internal fun PcScreen(model: PcRemoteModel) {
     }
     PcPointerSurface(model) { trackpadArea ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val keyHeight = KeyboardLayout.keyHeight(maxHeight)
+            val fullscreenKeyboard = landscape && keyboardVisible
+            val keyHeight = if (fullscreenKeyboard) (maxHeight - KeyboardLayout.RowGap * (KeyboardLayout.ROW_COUNT - 1)) / KeyboardLayout.ROW_COUNT else KeyboardLayout.keyHeight(maxHeight)
+            val toolbarSize = minOf(KeyboardLayout.ToolbarSize, keyHeight)
             val toolbar: @Composable () -> Unit = {
                 Column(Modifier.width(KeyboardLayout.ToolbarSize * 4), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
@@ -78,7 +82,7 @@ internal fun PcScreen(model: PcRemoteModel) {
                     }
                     Row(Modifier.height(keyHeight), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            Modifier.size(KeyboardLayout.ToolbarSize).clip(CircleShape)
+                            Modifier.size(toolbarSize).clip(CircleShape)
                                 .combinedClickable(
                                     role = Role.Button,
                                     onClickLabel = "Сменить язык ПК и подписи клавиш",
@@ -98,16 +102,16 @@ internal fun PcScreen(model: PcRemoteModel) {
                         IconToggleButton(
                             checked = numpad,
                             onCheckedChange = { numpad = it; keyboardVisible = true },
-                            modifier = Modifier.size(KeyboardLayout.ToolbarSize),
+                            modifier = Modifier.size(toolbarSize),
                         ) {
                             Icon(if (numpad) Icons.Rounded.Keyboard else Icons.Rounded.Dialpad,
                                 if (numpad) "Показать буквенную клавиатуру" else "Показать нумпад и дополнительные клавиши")
                         }
-                        IconButton(onClick = { keyboardVisible = !keyboardVisible }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
+                        IconButton(onClick = { keyboardVisible = !keyboardVisible }, modifier = Modifier.size(toolbarSize)) {
                             Icon(if (keyboardVisible) Icons.Rounded.KeyboardHide else Icons.Rounded.Keyboard,
                                 if (keyboardVisible) "Скрыть клавиатуру" else "Показать клавиатуру")
                         }
-                        IconButton(onClick = { settingsVisible = true }, modifier = Modifier.size(KeyboardLayout.ToolbarSize)) {
+                        IconButton(onClick = { settingsVisible = true }, modifier = Modifier.size(toolbarSize)) {
                             Icon(Icons.Rounded.Tune, "Настройки")
                         }
                     }
@@ -117,19 +121,19 @@ internal fun PcScreen(model: PcRemoteModel) {
                 Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
             ) {
-                Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
-                    AppHeader(if (model.connected) model.deviceName else "Не подключен",
+                if (!fullscreenKeyboard) Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
+                    AppHeader(if (model.connected) model.deviceName else "Подключить ПК",
                         onAction = {
-                        if (Build.VERSION.SDK_INT >= 31 && !model.hasPermission()) permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
-                        else { model.start(); devicesVisible = true }
+                        devicesVisible = true
+                        if (model.hasPermission()) model.start()
                     }, actionIcon = Icons.Rounded.Devices,
                         actionDescription = if (model.connected) "Устройства" else "Подключить")
                 }
-                Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding).weight(1f)) {
+                if (!fullscreenKeyboard) Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding).weight(1f)) {
                     Trackpad(trackpadArea.fillMaxSize())
                 }
                 if (keyboardVisible) {
-                    PcKeyboard(model, russian, keyHeight, numpad, toolbar)
+                    PcKeyboard(model, russian, keyHeight, numpad, landscape = fullscreenKeyboard, toolbar = toolbar)
                 } else {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { toolbar() }
                 }
@@ -138,36 +142,48 @@ internal fun PcScreen(model: PcRemoteModel) {
     }
     if (devicesVisible) RemoteDialog(
         onDismissRequest = { devicesVisible = false },
-        title = { Text("Устройства") },
+        title = { Text(model.selectedDeviceName?.let { "ПК · $it" } ?: "Подключить ПК") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-                Text(model.status)
-                if (!model.registered) TextButton(onClick = { launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }) { Text("Включить Bluetooth") }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(enabled = model.registered, onClick = {
+                FilledTonalButton(onClick = { devicesVisible = false; companionVisible = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (model.companionConnected) "Компаньон" else if (model.hasCompanion && model.companionError == null) "Компаньон · подключение…" else "Подключить компаньон")
+                }
+                HorizontalDivider()
+                Text("Bluetooth · клавиатура и мышь", style = MaterialTheme.typography.titleSmall)
+                if (!model.hasPermission()) TextButton(onClick = {
+                    if (Build.VERSION.SDK_INT >= 31) permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
+                }) { Text("Разрешить Bluetooth") }
+                if (model.connectionError.isNotBlank()) Text(model.connectionError, color = MaterialTheme.colorScheme.error)
+                if (model.bluetoothState == BluetoothAdapter.STATE_OFF) TextButton(onClick = { launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }) { Text("Включить Bluetooth") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
+                    FilledTonalButton(modifier = Modifier.weight(1.6f), contentPadding = PaddingValues(horizontal = RemoteLayout.Gap), enabled = model.registered, onClick = {
                         if (Build.VERSION.SDK_INT >= 31 && view.context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
                             permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
                         else { model.preparePairing(); launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)) }
-                    }) { Text("Видимость · 2 минуты") }
-                    TextButton(onClick = { model.start(); model.refreshDevices() }) { Text("Обновить") }
+                    }) { Text("Видимость · 2 мин") }
+                    OutlinedButton(modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = RemoteLayout.Gap), onClick = { model.start(); model.refreshDevices() }) { Text("Обновить") }
                 }
                 if (launchError.isNotEmpty()) Text(launchError)
-                Column {
+                DialogActionGroup {
                     model.devices.forEach { device ->
-                        TextButton(enabled = model.registered, onClick = { model.connect(device) }) { Text(model.deviceLabel(device)) }
+                        DialogActionRow(model.deviceLabel(device), selected = model.isSelectedDevice(device), loading = model.isConnectingDevice(device), enabled = model.registered) {
+                            model.connect(device)
+                        }
                     }
                 }
-                if (model.connected) TextButton(onClick = model::disconnect) { Text("Отключить компьютер") }
             }
         },
+        dismissButton = if (model.hasSelectedDevice) ({ TextButton(onClick = { model.forgetPc(); if (!model.hasSelectedDevice) devicesVisible = false }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Забыть ПК") } }) else null,
         confirmButton = { TextButton(onClick = { devicesVisible = false }) { Text("Готово") } },
     )
+    if (companionVisible) CompanionDialog(model) { companionVisible = false }
     if (settingsVisible) {
         RemoteDialog(
             onDismissRequest = { settingsVisible = false },
             title = { Text("Настройки") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
+                    if (landscape) FilledTonalButton(onClick = { settingsVisible = false; devicesVisible = true }, modifier = Modifier.fillMaxWidth()) { Text("Подключить ПК") }
                     Text("Тачпад", style = MaterialTheme.typography.titleSmall)
                     Text("Чувствительность: ${"%.1f".format(model.sensitivity)}×")
                     Slider(
