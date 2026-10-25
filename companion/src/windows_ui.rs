@@ -52,6 +52,7 @@ fn blend(a: u32, b: u32, amount: u32) -> u32 {
 struct Visual {
     dpi: i32,
     dark: bool,
+    background: u32,
     card: u32,
     text: u32,
     muted: u32,
@@ -63,6 +64,7 @@ struct Visual {
     normal: HFONT,
     heading: HFONT,
     theme_icon: HICON,
+    caption_icon: HICON,
     show_pairing: bool,
     connections: usize,
     small: HFONT,
@@ -142,6 +144,7 @@ impl Visual {
         Self {
             dpi: dpi as i32,
             dark,
+            background,
             card,
             text: if dark {
                 rgb(233, 238, 232)
@@ -160,7 +163,8 @@ impl Visual {
             card_brush: CreateSolidBrush(card),
             normal: font(16, 400),
             heading: font(20, 600),
-            theme_icon: themed_icon(icon_colors.0, icon_colors.1, icon_colors.2),
+            theme_icon: themed_icon(icon_colors.0, icon_colors.1, icon_colors.2, 0),
+            caption_icon: themed_icon(icon_colors.0, icon_colors.1, icon_colors.2, 8),
             show_pairing: APP.get().unwrap().phone_connections() == 0,
             connections: APP.get().unwrap().phone_connections(),
             small: font(13, 400),
@@ -216,6 +220,7 @@ impl Drop for Visual {
     fn drop(&mut self) {
         unsafe {
             DestroyIcon(self.theme_icon);
+            DestroyIcon(self.caption_icon);
             for object in [
                 self.background_brush as HGDIOBJ,
                 self.card_brush as _,
@@ -241,7 +246,7 @@ unsafe fn icon() -> HICON {
         LR_SHARED,
     ) as _
 }
-unsafe fn themed_icon(primary: u32, detail: u32, background: u32) -> HICON {
+unsafe fn themed_icon(primary: u32, detail: u32, background: u32, inset: usize) -> HICON {
     let mut info: BITMAPINFO = std::mem::zeroed();
     info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
     info.bmiHeader.biWidth = 64;
@@ -254,11 +259,11 @@ unsafe fn themed_icon(primary: u32, detail: u32, background: u32) -> HICON {
         return CopyIcon(icon());
     }
     let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, 64 * 64);
-    for (pixel, source) in pixels.iter_mut().zip(
-        crate::windows_icon::pixels(64, primary, detail, background)
-            .as_chunks::<4>()
-            .0,
-    ) {
+    pixels.fill(0);
+    let size = 64 - 2 * inset;
+    let source = crate::windows_icon::pixels(size, primary, detail, background);
+    for (index, source) in source.as_chunks::<4>().0.iter().enumerate() {
+        let pixel = &mut pixels[(index / size + inset) * 64 + index % size + inset];
         let a = source[3] as u32;
         *pixel = (source[0] as u32 * a / 255)
             | (source[1] as u32 * a / 255) << 8
@@ -378,7 +383,7 @@ unsafe fn layout(window: HWND) {
         .as_ptr(),
     );
     SendMessageW(window, WM_SETICON, ICON_BIG as _, v.theme_icon as _);
-    SendMessageW(window, WM_SETICON, ICON_SMALL as _, v.theme_icon as _);
+    SendMessageW(window, WM_SETICON, ICON_SMALL as _, v.caption_icon as _);
     for (id, x, y, w, h) in [
         (
             PAIR,
@@ -408,7 +413,20 @@ unsafe fn layout(window: HWND) {
         SendMessageW(child, WM_SETFONT, v.normal as _, 1);
     }
     let dark = v.dark as i32;
-    DwmSetWindowAttribute(window, 20, &dark as *const _ as _, 4);
+    DwmSetWindowAttribute(
+        window,
+        DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+        &dark as *const _ as _,
+        4,
+    );
+    // Windows 11 supports native caption colors; older versions keep their system frame.
+    for (attribute, color) in [
+        (DWMWA_CAPTION_COLOR, v.background),
+        (DWMWA_TEXT_COLOR, v.text),
+        (DWMWA_BORDER_COLOR, v.background),
+    ] {
+        DwmSetWindowAttribute(window, attribute as u32, &color as *const _ as _, 4);
+    }
 }
 unsafe fn copy_code(window: HWND) {
     let app = APP.get().unwrap();
