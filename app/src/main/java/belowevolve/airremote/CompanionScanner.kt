@@ -25,7 +25,7 @@ import java.util.Locale
 // ZXing exposes zoom through its legacy camera API. Keep that detail inside this view.
 @Suppress("DEPRECATION")
 @Composable
-internal fun CompanionScanner(onCode: (String) -> Unit, dismiss: () -> Unit) {
+internal fun CompanionScanner(onCode: (String) -> Unit, onManualCode: () -> Unit, dismiss: () -> Unit) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val codeCallback by rememberUpdatedState(onCode)
@@ -102,6 +102,7 @@ internal fun CompanionScanner(onCode: (String) -> Unit, dismiss: () -> Unit) {
                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
             }
         },
+        dismissButton = { TextButton(onClick = onManualCode) { Text("Ввести код") } },
         confirmButton = { TextButton(onClick = dismiss) { Text("Отмена") } },
     )
 }
