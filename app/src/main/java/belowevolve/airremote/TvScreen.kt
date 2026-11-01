@@ -138,10 +138,10 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
                 ) {
-                    ColorButton(RemoteColors.Red, Modifier.weight(1f)) { model.key(183) }
-                    ColorButton(RemoteColors.Green, Modifier.weight(1f)) { model.key(184) }
-                    ColorButton(RemoteColors.Yellow, Modifier.weight(1f)) { model.key(185) }
-                    ColorButton(RemoteColors.Blue, Modifier.weight(1f)) { model.key(186) }
+                    ColorButton(RemoteColors.Red, Modifier.weight(1f)) { model.key(android.view.KeyEvent.KEYCODE_PROG_RED) }
+                    ColorButton(RemoteColors.Green, Modifier.weight(1f)) { model.key(android.view.KeyEvent.KEYCODE_PROG_GREEN) }
+                    ColorButton(RemoteColors.Yellow, Modifier.weight(1f)) { model.key(android.view.KeyEvent.KEYCODE_PROG_YELLOW) }
+                    ColorButton(RemoteColors.Blue, Modifier.weight(1f)) { model.key(android.view.KeyEvent.KEYCODE_PROG_BLUE) }
                 }
 
                 BoxWithConstraints(
@@ -208,7 +208,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 if (model.connected) {
                     DialogActionGroup {
                         DialogActionRow("Входы / HDMI") {
-                            model.key(178)
+                            model.key(android.view.KeyEvent.KEYCODE_TV_INPUT)
                             settings = false
                         }
                     }

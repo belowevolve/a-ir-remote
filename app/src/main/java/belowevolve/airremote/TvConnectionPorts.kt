@@ -8,7 +8,9 @@ internal class TvConnectionPorts {
     private val working = ConcurrentHashMap<String, Int>()
 
     fun connect(host: String, attempt: (Int, () -> Unit) -> Unit) {
-        val preferred = working[host] ?: 6465
+        // 6466 is the normal control endpoint. 6465 is a vendor wake endpoint
+        // and can accept a session without sending periodic keepalives.
+        val preferred = working[host] ?: 6466
         var established = false
         try {
             attempt(preferred) {

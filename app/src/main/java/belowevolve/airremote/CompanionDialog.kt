@@ -47,8 +47,9 @@ internal fun CompanionDialog(model: PcRemoteModel, dismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
                 model.companionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (model.companionConnecting && model.companionError == null) Text("Подключение к компаньону…")
                 FilledTonalButton(onClick = { scanning = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (model.hasCompanion && !model.companionConnected && model.companionError == null) "Подключение…" else if (model.hasCompanion) "Подключить другой ПК" else "Сканировать QR")
+                    Text(if (model.hasCompanion) "Подключить другой ПК" else "Сканировать QR")
                 }
 
             }

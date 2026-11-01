@@ -23,6 +23,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.channels.Channel
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,7 +55,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     private var keyboardEpoch = 0L
     private var keyboardRevision = 0L
-    private var connectionGeneration = 0L
+    @Volatile private var connectionGeneration = 0L
     private var networkPowerHeld = false
 
     private data class TvCommand(val generation: Long, val action: TvClient.() -> Unit)
@@ -101,7 +102,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 if (!connected || (command.generation != connectionGeneration)) continue
                 try {
                     withContext(Dispatchers.IO) {
-                        command.action(client)
+                        if (command.generation == connectionGeneration) command.action(client)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -383,6 +384,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 status = "Нужно сопряжение"
                 return@launch
             }
+            var reconnectAttempts = 0
             while (isActive) {
                 status = "Подключение…"
                 val generation = connectionGeneration
@@ -414,6 +416,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                             viewModelScope.launch {
                                 if (foreground && generation == connectionGeneration) {
                                     connected = true
+                                    reconnectAttempts = 0
                                     status = "Подключён по Wi-Fi"
                                     if (wakePending) {
                                         wakePending = false
@@ -439,7 +442,12 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                         break
                     }
                 }
-                delay(3.seconds)
+                val retryDelay = when (reconnectAttempts++) {
+                    0 -> 250.milliseconds
+                    1 -> 1.seconds
+                    else -> 3.seconds
+                }
+                delay(retryDelay)
             }
         }
     }
@@ -450,25 +458,22 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun holdOk(pressed: Boolean) {
-        enqueue { key(23, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+        enqueue { sendKey(23, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
     }
 
-    fun key(code: Int) {
-        if (connected) {
-            enqueue { key(code) }
-        } else {
+    // User actions share the same disconnected-state behavior; the transport only sends packets.
+    private fun sendCommand(action: TvClient.() -> Unit) {
+        if (!connected) {
             message = "ТВ не подключён"
             connect()
+            return
         }
+        enqueue(action)
     }
 
-    fun launchYouTube() {
-        if (connected) {
-            enqueue { launchYouTube() }
-        } else {
-            message = "ТВ не подключён"
-        }
-    }
+    fun key(code: Int) = sendCommand { sendKey(code) }
+
+    fun launchYouTube() = sendCommand { launchAppLink("https://www.youtube.com/tv") }
 
     fun holdPower(pressed: Boolean) {
         if (hasIr && powerSignal != null) {
@@ -479,7 +484,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (!pressed) {
             if (networkPowerHeld) {
                 networkPowerHeld = false
-                enqueue { key(26, remote.Remotemessage.RemoteDirection.END_LONG) }
+                enqueue { sendKey(26, remote.Remotemessage.RemoteDirection.END_LONG) }
             }
             return
         }
@@ -488,7 +493,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             return
         }
         networkPowerHeld = true
-        enqueue { key(26, remote.Remotemessage.RemoteDirection.START_LONG) }
+        enqueue { sendKey(26, remote.Remotemessage.RemoteDirection.START_LONG) }
     }
 
     fun power() {
@@ -563,6 +568,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         pause()
+        commands.close()
         if (initialized) client.cancelPairing()
     }
 }

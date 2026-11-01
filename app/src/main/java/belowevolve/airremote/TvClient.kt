@@ -163,8 +163,10 @@ class TvClient(private val identity: TvIdentity) {
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
                     msg.hasRemoteStart() -> {
                         if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power port=$port on=${msg.remoteStart.started}")
-                        // Only an established session may wait for a slow heartbeat.
-                        s.soTimeout = 65000
+                        // The vendor wake endpoint can remain silent while healthy.
+                        // The normal control endpoint sends heartbeats, so retain
+                        // its deadline to detect a stalled network connection.
+                        s.soTimeout = if (port == 6465) 0 else 65000
                         ready(msg.remoteStart.started)
                     }
                     msg.hasRemoteVoiceBegin() -> synchronized(writeLock) {
@@ -211,16 +213,16 @@ class TvClient(private val identity: TvIdentity) {
         }
     }
     
-    fun key(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) {
+    fun sendKey(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) {
         if (code == 26 && Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power key port=${socket?.port} direction=$direction")
         send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
     }
     
-    fun launchYouTube() {
+    fun launchAppLink(link: String) {
         check((features and 512) != 0) { "ТВ не поддерживает запуск приложений по сети" }
         send(
             RemoteMessage.newBuilder().setRemoteAppLinkLaunchRequest(
-                RemoteAppLinkLaunchRequest.newBuilder().setAppLink("https://www.youtube.com/tv"),
+                RemoteAppLinkLaunchRequest.newBuilder().setAppLink(link),
             ).build(),
         )
     }

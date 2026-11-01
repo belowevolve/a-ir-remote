@@ -95,6 +95,7 @@ internal fun RemoteDialog(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                     dismissButton?.invoke()
+                    Spacer(Modifier.weight(1f))
                     confirmButton()
                 }
             }

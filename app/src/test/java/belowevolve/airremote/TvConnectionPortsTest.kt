@@ -12,11 +12,11 @@ class TvConnectionPortsTest {
         val attempts = mutableListOf<Int>()
         ports.connect("tv") { port, ready ->
             attempts += port
-            if (port == 6465) throw SSLProtocolException("certificate_unknown")
+            if (port == 6466) throw SSLProtocolException("certificate_unknown")
             ready()
         }
         ports.connect("tv") { port, ready -> attempts += port; ready() }
-        assertEquals(listOf(6465, 6466, 6466), attempts)
+        assertEquals(listOf(6466, 6465, 6465), attempts)
     }
 
     @Test fun disconnectedEstablishedSessionDoesNotSilentlyCreateAnotherSession() {
@@ -28,7 +28,7 @@ class TvConnectionPortsTest {
                 throw IOException("disconnected")
             }
         }
-        assertEquals(listOf(6465), attempts)
+        assertEquals(listOf(6466), attempts)
     }
 
     @Test fun cancellationDoesNotTryAnotherPort() {
@@ -39,22 +39,22 @@ class TvConnectionPortsTest {
                 throw CancellationException()
             }
         }
-        assertEquals(listOf(6465), attempts)
+        assertEquals(listOf(6466), attempts)
     }
 
     @Test fun unavailableCachedPortCanFallBackWithoutAffectingOtherTelevisions() {
         val ports = TvConnectionPorts()
         ports.connect("tv") { port, ready ->
-            if (port == 6465) throw IOException()
+            if (port == 6466) throw IOException()
             ready()
         }
         val attempts = mutableListOf<Int>()
         ports.connect("tv") { port, ready ->
             attempts += port
-            if (port == 6466) throw IOException()
+            if (port == 6465) throw IOException()
             ready()
         }
         ports.connect("another-tv") { port, ready -> attempts += port; ready() }
-        assertEquals(listOf(6466, 6465, 6465), attempts)
+        assertEquals(listOf(6465, 6466, 6466), attempts)
     }
 }

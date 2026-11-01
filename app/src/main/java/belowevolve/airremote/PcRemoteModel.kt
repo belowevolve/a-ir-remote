@@ -58,6 +58,8 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     var russianLayout by mutableStateOf(prefs.getBoolean("russian_layout", false))
         private set
 
+    var companionConnecting by mutableStateOf(false)
+        private set
     var companionConnected by mutableStateOf(false)
         private set
     var companionError by mutableStateOf<String?>(null)
@@ -65,6 +67,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     var hasCompanion by mutableStateOf(CompanionEndpoint.load(application) != null)
         private set
     private val companion = CompanionClient(application, viewModelScope,
+        onConnecting = { companionConnecting = it && hasCompanion },
         onStatus = { active, error -> companionConnected = active; companionError = error.takeIf { hasCompanion } },
         onLayout = { language ->
             if (language == "ru" || language == "en") {
