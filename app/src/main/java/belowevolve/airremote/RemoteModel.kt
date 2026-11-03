@@ -476,11 +476,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun launchYouTube() = sendCommand { launchAppLink("https://www.youtube.com/tv") }
 
     fun holdPower(pressed: Boolean) {
-        if (hasIr && powerSignal != null) {
-            // One power signal after the long-press threshold, never repeated toggles.
-            if (pressed) powerIr()
-            return
-        }
         if (!pressed) {
             if (networkPowerHeld) {
                 networkPowerHeld = false
@@ -489,7 +484,9 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (!connected) {
-            connect(wake = true)
+            // IR supports a short power toggle only. Use it to wake an offline
+            // TV; a connected TV must receive real network hold/release edges.
+            if (hasIr && powerSignal != null) powerIr() else connect(wake = true)
             return
         }
         networkPowerHeld = true

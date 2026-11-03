@@ -6,8 +6,9 @@ import kotlin.math.max
 /** A stable finger arms a hold. Meaningful motion always starts a fresh delay. */
 internal class DpadRepeat(
     private val touchSlop: Float,
-    private val holdDelayMillis: Long,
-    private val intervalMillis: Long = 150,
+    private val holdDelayMillis: Long = 200,
+    private val intervalMillis: Long = 75,
+    private val okHoldDelayMillis: Long = 500,
 ) {
     private var key: Int? = null
     private var anchorX = 0f
@@ -21,7 +22,7 @@ internal class DpadRepeat(
             key = nextKey
             anchorX = x
             anchorY = y
-            deadline = nextKey?.let { now + holdDelayMillis }
+            deadline = nextKey?.let { now + if (it == 23) okHoldDelayMillis else holdDelayMillis }
         }
     }
 

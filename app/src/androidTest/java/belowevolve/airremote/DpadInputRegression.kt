@@ -8,6 +8,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -39,8 +41,8 @@ internal fun Instrumentation.checkDpadInput() {
     fun expectKey(key: Int, timeout: Long = 100) {
         check(keys.poll(timeout, MILLISECONDS) == key) { "Expected D-pad key $key" }
     }
-    fun expectQuiet() {
-        check(keys.poll(250, MILLISECONDS) == null) { "Unexpected D-pad step" }
+    fun expectQuiet(timeout: Long = 250) {
+        check(keys.poll(timeout, MILLISECONDS) == null) { "Unexpected D-pad step" }
         check(holds.isEmpty()) { "Unexpected OK hold" }
     }
     try {
@@ -70,9 +72,9 @@ internal fun Instrumentation.checkDpadInput() {
         pointer(MotionEvent.ACTION_DOWN, cx, cy)
         pointer(MotionEvent.ACTION_MOVE, cx + step, cy)
         expectKey(22)
-        expectQuiet()
-        expectKey(22, 600)
-        expectKey(22, 300)
+        expectQuiet(100)
+        expectKey(22, 250)
+        expectKey(22, 150)
         pointer(MotionEvent.ACTION_UP)
         expectQuiet()
 
@@ -121,6 +123,37 @@ internal fun Instrumentation.checkDpadInput() {
         check(holds.poll(900, MILLISECONDS) == true)
         pointer(MotionEvent.ACTION_CANCEL)
         check(holds.poll(300, MILLISECONDS) == false)
+        expectQuiet()
+
+        // The power control must distinguish a short click from paired hold edges.
+        laidOut.clear()
+        runOnMainSync {
+            activity.setContent {
+                RemoteTheme {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        RemoteButton(Icons.Rounded.PowerSettingsNew, "Питание",
+                            Modifier.size(64.dp).onGloballyPositioned { laidOut.offer(it.boundsInWindow()) },
+                            onHold = { holds.offer(it) }, onClick = { keys.offer(26) })
+                    }
+                }
+            }
+        }
+        val power = checkNotNull(laidOut.poll(3000, MILLISECONDS))
+        pointer(MotionEvent.ACTION_DOWN, power.center.x, power.center.y)
+        pointer(MotionEvent.ACTION_UP)
+        expectKey(26)
+        expectQuiet()
+
+        pointer(MotionEvent.ACTION_DOWN, power.center.x, power.center.y)
+        check(holds.poll(900, MILLISECONDS) == true) { "Power hold was not started" }
+        pointer(MotionEvent.ACTION_UP)
+        check(holds.poll(300, MILLISECONDS) == false) { "Power hold was not released" }
+        expectQuiet()
+
+        pointer(MotionEvent.ACTION_DOWN, power.center.x, power.center.y)
+        check(holds.poll(900, MILLISECONDS) == true)
+        pointer(MotionEvent.ACTION_CANCEL)
+        check(holds.poll(300, MILLISECONDS) == false) { "Power remained held after cancellation" }
         expectQuiet()
     } finally {
         runOnMainSync { activity.finish() }

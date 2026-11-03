@@ -52,7 +52,7 @@ internal fun TvDpad(
                 var repeated = false
                 var arrowRepeated = false
                 val repeat = DpadRepeat(viewConfiguration.touchSlop,
-                    maxOf(500L, viewConfiguration.longPressTimeoutMillis))
+                    okHoldDelayMillis = viewConfiguration.longPressTimeoutMillis)
                 repeat.update(key, down.position.x, down.position.y, SystemClock.uptimeMillis())
                 fun press(code: Int) {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
