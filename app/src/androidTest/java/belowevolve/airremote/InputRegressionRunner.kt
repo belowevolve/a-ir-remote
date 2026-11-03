@@ -58,13 +58,14 @@ class InputRegressionRunner : Instrumentation() {
                 check(editor.text.toString() == "здравствуйте ")
                 editor.onValueChanged = null
             }
+            checkDpadInput()
             tvHost?.let(::checkTvEditing)
             val first = TvIdentity(targetContext).certificate
             val second = TvIdentity(targetContext).certificate
             check(first.encoded.contentEquals(second.encoded)) { "Identity changed on reopen" }
             check(first.subjectX500Principal.name.startsWith("CN=Air Remote/"))
             check(first.subjectX500Principal.name != "CN=Air Remote")
-            results.putString("stream", "IME batch, suggestion replacement, selection and stable unique certificate: PASS\n")
+            results.putString("stream", "IME batch, suggestion replacement, selection, stable unique certificate and D-pad swipe/hold/release/cancellation: PASS\n")
             if (tvHost != null) results.putString("stream", results.getString("stream") + "TV authoritative email + middle insertion/deletion + cursor after reconnect: PASS\n")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {

@@ -1,5 +1,6 @@
 package belowevolve.airremote
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -13,6 +14,8 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,11 +28,18 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun TvDpad(model: RemoteModel, modifier: Modifier = Modifier) {
+internal fun TvDpad(
+    connected: Boolean,
+    onKey: (Int) -> Unit,
+    onHoldOk: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val haptic = LocalHapticFeedback.current
+    val sendKey by rememberUpdatedState(onKey)
+    val holdOk by rememberUpdatedState(onHoldOk)
     BoxWithConstraints(modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer)
         .border(TvLayout.DpadBorder, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-        .pointerInput(model.connected) {
+        .pointerInput(connected) {
             awaitEachGesture {
                 val down = awaitFirstDown(pass = PointerEventPass.Initial)
                 fun keyAt(x: Float, y: Float) = dpadKey(x - size.width / 2f, y - size.height / 2f,
@@ -40,46 +50,65 @@ internal fun TvDpad(model: RemoteModel, modifier: Modifier = Modifier) {
                     viewConfiguration.touchSlop, maxOf(32.dp.toPx(), viewConfiguration.touchSlop * 2))
                 var heldOk = false
                 var repeated = false
-                var deadline = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
-                var now = down.uptimeMillis
+                var arrowRepeated = false
+                val repeat = DpadRepeat(viewConfiguration.touchSlop,
+                    maxOf(500L, viewConfiguration.longPressTimeoutMillis))
+                repeat.update(key, down.position.x, down.position.y, SystemClock.uptimeMillis())
                 fun press(code: Int) {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    model.key(code)
+                    sendKey(code)
                 }
                 try {
                     while (true) {
-                        val event = if (gesture.moving || heldOk) awaitPointerEvent(PointerEventPass.Initial)
-                        else withTimeoutOrNull((deadline - now).coerceAtLeast(1)) {
+                        val deadline = repeat.deadline.takeUnless { heldOk }
+                        val event = if (deadline == null) awaitPointerEvent(PointerEventPass.Initial)
+                        else withTimeoutOrNull((deadline - SystemClock.uptimeMillis()).coerceAtLeast(1)) {
                             awaitPointerEvent(PointerEventPass.Initial)
                         }
                         if (event == null) {
+                            val code = repeat.poll(SystemClock.uptimeMillis()) ?: continue
                             repeated = true
-                            if (key == 23) {
+                            if (code == 23) {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                model.holdOk(true)
+                                holdOk(true)
                                 heldOk = true
-                            } else press(key)
-                            now = deadline
-                            deadline += 80
+                            } else {
+                                arrowRepeated = true
+                                press(code)
+                            }
                             continue
                         }
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        now = change.uptimeMillis
                         event.changes.forEach { it.consume() }
                         // A second finger cancels this gesture instead of leaving OK held.
                         if (event.changes.any { it.id != down.id && it.pressed }) break
-                        val swipe = gesture.move(change.position.x, change.position.y)
-                        if (gesture.moving && heldOk) {
-                            model.holdOk(false)
-                            heldOk = false
-                        }
-                        swipe?.let(::press)
+                        val region = keyAt(change.position.x, change.position.y) ?: break
                         if (!change.pressed) {
-                            if (!repeated) gesture.tap()?.let(::press)
+                            // Release coordinates can drift. They may cancel a tap,
+                            // but must not inject another swipe step.
+                            gesture.move(change.position.x, change.position.y)
+                            if (!repeated && region == key) gesture.tap()?.let(::press)
                             break
                         }
+                        val swipe = gesture.move(change.position.x, change.position.y)
+                        if (heldOk && (gesture.moving || region != 23)) {
+                            holdOk(false)
+                            heldOk = false
+                        }
+                        // Returning to the centre is a stop after auto-repeat,
+                        // rather than an unwanted step in the opposite direction.
+                        if (swipe != null && (!arrowRepeated || region == swipe)) {
+                            press(swipe)
+                            arrowRepeated = false
+                        }
+                        // After a swipe, only its matching arrow can repeat. Passing
+                        // through OK or an unrelated sector never starts a new hold.
+                        val holdKey = if (gesture.moving) region.takeIf { it == gesture.direction }
+                            else key.takeIf { it == region }
+                        repeat.update(holdKey, change.position.x, change.position.y,
+                            SystemClock.uptimeMillis(), restart = swipe != null)
                     }
-                } finally { if (heldOk) model.holdOk(false) }
+                } finally { if (heldOk) holdOk(false) }
             }
         }) {
         // Centre each arrow in the ring between the OK button and outer edge.
@@ -92,12 +121,12 @@ internal fun TvDpad(model: RemoteModel, modifier: Modifier = Modifier) {
             Triple(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Вправо", Alignment.CenterEnd),
         ).forEachIndexed { index, (icon, label, alignment) ->
             Box(Modifier.align(alignment).padding(arrowInset).size(RemoteLayout.ActionSize)
-                .semantics { onClick(label) { model.key(19 + index); true } }, contentAlignment = Alignment.Center) {
+                .semantics { onClick(label) { sendKey(19 + index); true } }, contentAlignment = Alignment.Center) {
                 Icon(icon, label, Modifier.size(TvLayout.DirectionIconSize), tint = MaterialTheme.colorScheme.onSurface)
             }
         }
         Surface(Modifier.size(TvLayout.ConfirmSize).align(Alignment.Center)
-            .semantics { onClick("OK") { model.key(23); true } }, shape = CircleShape,
+            .semantics { onClick("OK") { sendKey(23); true } }, shape = CircleShape,
             color = MaterialTheme.colorScheme.primary) {
             Box(contentAlignment = Alignment.Center) {
                 Text("OK", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge)

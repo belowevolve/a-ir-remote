@@ -149,7 +149,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     contentAlignment = Alignment.Center,
                 ) {
                     val diameter = minOf(maxWidth, maxHeight, TvLayout.DpadMaxSize)
-                    TvDpad(model, Modifier.size(diameter))
+                    TvDpad(model.connected, model::key, model::holdOk, Modifier.size(diameter))
                 }
 
                 Row(
@@ -262,7 +262,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                     value = pin,
                     onValueChange = { newValue ->
                         pin = newValue.filter { c ->
-                            (c.isDigit()) || (c.lowercaseChar() in ('a'..'f'))
+                            (c in '0'..'9') || (c.lowercaseChar() in ('a'..'f'))
                         }.take(6).uppercase()
                     },
                     label = { Text("6 символов") },

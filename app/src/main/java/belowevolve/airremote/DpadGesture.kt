@@ -13,6 +13,8 @@ internal class DpadGesture(
 ) {
     var moving = false
         private set
+    var direction: Int? = null
+        private set
 
     fun move(x: Float, y: Float): Int? {
         val dx = x - anchorX
@@ -22,7 +24,7 @@ internal class DpadGesture(
         if (distance < swipeDistance) return null
         anchorX = x
         anchorY = y
-        return dpadDirection(dx, dy)
+        return dpadDirection(dx, dy).also { direction = it }
     }
 
     fun tap(): Int? = tapKey.takeUnless { moving }
