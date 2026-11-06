@@ -2,7 +2,7 @@
 
 Пульт Android TV, Bluetooth-клавиатура и трекпад для ПК, Wi-Fi-микрофон.
 
-[Скачать APK](https://github.com/belowevolve/a-ir-remote/releases/latest) · [Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22belowevolve.airremote%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fbelowevolve%2Fa-ir-remote%22%2C%22author%22%3A%22belowevolve%22%2C%22name%22%3A%22Air%20Remote%22%7D)
+[Android APK](https://github.com/belowevolve/a-ir-remote/releases/download/v0.1.36/Air-Remote-0.1.36.apk) · [Windows Setup (.exe)](https://github.com/belowevolve/a-ir-remote/releases/download/v0.1.36/Air-Remote-Setup-0.5.6.exe) · [Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22belowevolve.airremote%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fbelowevolve%2Fa-ir-remote%22%2C%22author%22%3A%22belowevolve%22%2C%22name%22%3A%22Air%20Remote%22%7D)
 
 Android 9+. Компаньон: Windows 10/11 x64.
 
