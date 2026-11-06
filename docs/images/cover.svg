@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640">
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#151e17"/><stop offset="1" stop-color="#0b100d"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#8fc765" stop-opacity=".19"/><stop offset="1" stop-color="#8fc765" stop-opacity="0"/></radialGradient>
+    <linearGradient id="glass" x2=".8" y2="1"><stop stop-color="#2b3b2c"/><stop offset="1" stop-color="#172019"/></linearGradient>
+    <linearGradient id="phone" x2="1" y2="1"><stop stop-color="#4e614e"/><stop offset=".4" stop-color="#26382b"/><stop offset="1" stop-color="#101811"/></linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="22" stdDeviation="20" flood-color="#000" flood-opacity=".45"/></filter>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#bced91" stroke-opacity=".025"/></pattern>
+  </defs>
+  <rect width="1600" height="640" rx="32" fill="url(#bg)"/>
+  <rect width="1600" height="640" rx="32" fill="url(#grid)"/>
+  <ellipse cx="1170" cy="320" rx="530" ry="450" fill="url(#glow)"/>
+  <rect x="1" y="1" width="1598" height="638" rx="31" fill="none" stroke="#364438" stroke-opacity=".6"/>
+
+  <g transform="translate(76 64)">
+    <rect width="58" height="58" rx="18" fill="#283b25"/>
+    <g transform="translate(2 2) scale(.5)">
+      <path fill="#bced91" d="M45 29H63Q72 29 72 38V70Q72 79 63 79H45Q36 79 36 70V38Q36 29 45 29Z"/>
+      <path fill="#315318" d="M52 38Q52 36 54 36Q56 36 56 38V43H61Q63 43 63 45Q63 47 61 47H56V52Q56 54 54 54Q52 54 52 52V47H47Q45 47 45 45Q45 43 47 43H52ZM44 63Q44 61 46 61H48Q50 61 50 63V65Q50 67 48 67H46Q44 67 44 65ZM58 63Q58 61 60 61H62Q64 61 64 63V65Q64 67 62 67H60Q58 67 58 65Z"/>
+    </g>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="154" y="100" font-size="17" font-weight="700" letter-spacing="3" fill="#9fb49b">ANDROID + WINDOWS</text>
+    <text x="72" y="258" font-size="100" font-weight="700" letter-spacing="-5" fill="#eef6e9">Air Remote</text>
+    <text x="78" y="326" font-size="34" fill="#bced91">ТВ, ПК и микрофон.</text>
+    <text x="78" y="375" font-size="25" fill="#9aa995">Управление с телефона.</text>
+    <g font-size="18" fill="#c8d4c1">
+      <rect x="76" y="464" width="108" height="44" rx="22" fill="#22311f"/>
+      <text x="103" y="492">Wi-Fi</text>
+      <rect x="196" y="464" width="146" height="44" rx="22" fill="#22311f"/>
+      <text x="223" y="492">Bluetooth</text>
+    </g>
+    <text x="78" y="574" font-size="17" fill="#72856f">Android 9+  ·  Windows 10 / 11</text>
+  </g>
+
+  <g fill="none" stroke="#bced91" stroke-width="2" stroke-linecap="round" opacity=".28">
+    <path d="M800 384C720 190 913 130 1023 190" stroke-dasharray="3 10"/>
+    <path d="M1050 450C1118 578 1261 552 1330 491" stroke-dasharray="3 10"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1008" y="90" width="426" height="258" rx="22" fill="#172019" stroke="#52634e" stroke-width="2"/>
+    <rect x="1020" y="102" width="402" height="234" rx="13" fill="url(#glass)"/>
+    <path d="M1210 348V380M1157 382H1263" fill="none" stroke="#52634e" stroke-width="9" stroke-linecap="round"/>
+    <circle cx="1221" cy="216" r="49" fill="#31482b"/>
+    <path d="M1209 192L1245 216L1209 240Z" fill="#bced91"/>
+    <rect x="1050" y="295" width="100" height="5" rx="2.5" fill="#bced91" opacity=".55"/>
+    <rect x="1160" y="295" width="210" height="5" rx="2.5" fill="#53694c" opacity=".65"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1150" y="400" width="337" height="112" rx="17" fill="#223026" stroke="#4b5d48" stroke-width="2" transform="rotate(-8 1320 455)"/>
+    <g fill="#3e513b" transform="rotate(-8 1320 455)">
+      <path d="M1168 418H1469V438H1168ZM1168 445H1469V465H1168ZM1168 472H1225V492H1168ZM1232 472H1402V492H1232ZM1409 472H1469V492H1409Z"/>
+      <path d="M1191 418V465M1218 418V465M1245 418V465M1272 418V465M1299 418V465M1326 418V465M1353 418V465M1380 418V465M1407 418V465M1434 418V465M1461 418V465" stroke="#223026" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g filter="url(#shadow)" transform="rotate(-10 950 390)">
+    <rect x="830" y="210" width="224" height="368" rx="35" fill="url(#phone)" stroke="#7d9273" stroke-width="2"/>
+    <rect x="839" y="219" width="206" height="350" rx="27" fill="#101710"/>
+    <rect x="910" y="229" width="66" height="6" rx="3" fill="#30412e"/>
+    <g fill="#2c3e27"><rect x="857" y="257" width="50" height="24" rx="12"/><rect x="912" y="257" width="50" height="24" rx="12"/><rect x="967" y="257" width="59" height="24" rx="12"/></g>
+    <rect x="857" y="257" width="50" height="24" rx="12" fill="#bced91"/>
+    <g fill="#a5bd9a"><rect x="871" y="265" width="21" height="8" rx="3" fill="#315318"/><rect x="927" y="265" width="20" height="8" rx="3"/><rect x="984" y="265" width="24" height="8" rx="3"/></g>
+    <circle cx="943" cy="394" r="82" fill="#23311f" stroke="#3b4d35"/>
+    <circle cx="943" cy="394" r="31" fill="#bced91"/>
+    <g fill="none" stroke="#c7d6bd" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M935 334L943 326L951 334M935 454L943 462L951 454M884 386L876 394L884 402M1002 386L1010 394L1002 402"/></g>
+    <g fill="#2c3e27"><rect x="858" y="492" width="48" height="43" rx="14"/><rect x="919" y="492" width="48" height="43" rx="14"/><rect x="980" y="492" width="48" height="43" rx="14"/></g>
+    <g fill="none" stroke="#b3c6a7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M887 507L879 514L887 521M937 519V511H949V519M1000 514H1009M1005 509V519"/></g>
+    <rect x="909" y="551" width="68" height="4" rx="2" fill="#72856b"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <circle cx="1427" cy="320" r="55" fill="#bced91"/>
+    <g fill="none" stroke="#25451c" stroke-width="5" stroke-linecap="round"><rect x="1414" y="288" width="26" height="41" rx="13"/><path d="M1404 315V319A23 23 0 0 0 1450 319V315M1427 342V353M1414 353H1440"/></g>
+  </g>
+</svg>

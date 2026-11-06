@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="164" height="42" viewBox="0 0 164 42">
+  <rect x=".5" y=".5" width="163" height="41" rx="11.5" fill="#20301f" stroke="#506649"/>
+  <path d="M16 13h7v7h-7zm9 0h7v7h-7zm-9 9h7v7h-7zm9 0h7v7h-7z" fill="#bced91"/>
+  <text x="42" y="26" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="700" fill="#edf5e7">Windows Setup</text>
+</svg>
