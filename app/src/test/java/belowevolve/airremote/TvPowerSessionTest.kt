@@ -3,8 +3,11 @@ package belowevolve.airremote
 import java.io.IOException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -97,6 +100,34 @@ class TvPowerSessionTest {
         power.reset()
         power.update(true)
         power.ensureAwake { fail("Consumer must remain usable") }
+    }
+
+    @Test fun timedOutWakeDoesNotLeaveLaterCommandsWaitingOnAnOldRequest() = runBlocking {
+        val power = TvPowerSession(timeoutMillis = 20)
+        power.update(false)
+        try { power.ensureAwake {}; fail("Missing acknowledgement must time out") }
+        catch (expected: SocketTimeoutException) { }
+        power.ensureAwake { power.update(true) }
+    }
+
+    @Test fun cancelledWakeDoesNotStrandTheNextCommand() = runBlocking {
+        val power = TvPowerSession(timeoutMillis = 100, standbyTransitionMillis = 40)
+        power.update(true)
+        power.update(false)
+        val command = launch(start = CoroutineStart.UNDISPATCHED) {
+            power.ensureAwake { fail("Cancelled wake must not send POWER") }
+        }
+        command.cancelAndJoin()
+        power.ensureAwake { power.update(true) }
+    }
+
+    @Test fun callerTimeoutMustRemainCancellation() = runBlocking {
+        val power = TvPowerSession(timeoutMillis = 1000)
+        power.update(false)
+        try {
+            withTimeout(20) { power.ensureAwake {} }
+            fail("Caller timeout must cancel the operation")
+        } catch (expected: TimeoutCancellationException) { }
     }
 
     @Test fun immediateWakeAllowsTheOffTransitionToFinishWithoutBlindRetoggling() = runBlocking {

@@ -64,8 +64,9 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         private set
     var companionError by mutableStateOf<String?>(null)
         private set
-    var hasCompanion by mutableStateOf(CompanionEndpoint.load(application) != null)
-        private set
+    private var companionEndpoint by mutableStateOf(CompanionEndpoint.load(application))
+    val hasCompanion: Boolean get() = companionEndpoint != null
+    val companionHost: String? get() = companionEndpoint?.host
     private val companion = CompanionClient(application, viewModelScope,
         onConnecting = { companionConnecting = it && hasCompanion },
         onStatus = { active, error -> companionConnected = active; companionError = error.takeIf { hasCompanion } },
@@ -76,20 +77,18 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             } else companionError = "Раскладка ПК пока не поддерживается (доступны RU / EN)"
         },
     )
-    val companionHost: String? get() = if (hasCompanion) CompanionEndpoint.load(context)?.host else null
-
     fun pairCompanion(code: String) {
         val endpoint = CompanionEndpoint.parse(code)
         companion.stop()
         CompanionEndpoint.save(context, endpoint)
-        hasCompanion = true
+        companionEndpoint = endpoint
         companion.start()
     }
     fun forgetCompanion() {
         MicrophoneService.stop(context)
         companion.stop()
         CompanionEndpoint.save(context, null)
-        hasCompanion = false
+        companionEndpoint = null
         companionError = null
     }
 
@@ -120,18 +119,22 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun clearConnection() {
+        output?.close(); output = null
+        host = null
+        connected = false
+        modifiers = 0
+        dragging = false
+    }
+
     private val callback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, isRegistered: Boolean) {
             registered = isRegistered
             registering = false
             if (!isRegistered) {
                 stopKeepingConnection()
-                output?.close(); output = null
-                host = null
+                clearConnection()
                 disconnectingHost = null
-                connected = false
-                modifiers = 0
-                dragging = false
                 connectionError = "Служба клавиатуры отключена"
                 scheduleReconnect()
             } else if (closed || (!foreground && !keepingConnection) || (!enabled && !connected)) {
@@ -188,11 +191,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     if (disconnectingHost == device) disconnectingHost = null
                     if (host == device) {
-                        output?.close(); output = null
-                        host = null
-                        connected = false
-                        modifiers = 0
-                        dragging = false
+                        clearConnection()
                         connectionError = ""
                         val next = pendingHost
                         pendingHost = null
@@ -277,16 +276,12 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         }
         override fun onServiceDisconnected(profile: Int) {
             stopKeepingConnection()
-            output?.close(); output = null
+            clearConnection()
             hid = null
             requesting = false
             registering = false
             registered = false
-            connected = false
-            host = null
             disconnectingHost = null
-            modifiers = 0
-            dragging = false
             connectionError = "Служба Bluetooth отключена"
             scheduleReconnect()
         }

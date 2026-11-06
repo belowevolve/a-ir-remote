@@ -13,8 +13,8 @@ android {
         minSdk = 28
         targetSdk = 37
         testInstrumentationRunner = "belowevolve.airremote.InputRegressionRunner"
-        versionCode = 34
-        versionName = "0.1.33"
+        versionCode = 35
+        versionName = "0.1.34"
     }
 
     buildFeatures {

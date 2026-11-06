@@ -197,11 +197,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun pause() {
         foreground = false
-        resetConnectionState()
-        connectionJob?.cancel()
-        connectionJob = null
-        if (initialized) client.close()
-        connected = false
+        closeConnection()
         stopDiscovery()
     }
 
@@ -298,16 +294,14 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         }
         if (busy) return
         busy = true
-        connectionJob?.cancel()
-        client.close()
-        connected = false
-        resetConnectionState()
+        closeConnection()
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { client.beginPairing(targetHost) }
                 pairing = true
                 status = "Введите код с экрана ТВ"
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e("AirRemote", "Pairing failed", e)
                 status = "Сопряжение не удалось"
                 message = e.message ?: "Не удалось начать сопряжение"
@@ -326,6 +320,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 pairing = false
                 connect()
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e("AirRemote", "PIN verification failed", e)
                 message = e.message ?: "Не удалось подтвердить код"
             } finally {
@@ -342,13 +337,17 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun disconnect() {
-        prefs.edit { putBoolean("auto_connect", false) }
+    private fun closeConnection() {
         connectionJob?.cancel()
         connectionJob = null
         resetConnectionState()
         if (initialized) client.close()
         connected = false
+    }
+
+    fun disconnect() {
+        prefs.edit { putBoolean("auto_connect", false) }
+        closeConnection()
         status = "ТВ отключён"
     }
 
@@ -372,13 +371,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun connect(wake: Boolean = false) {
         prefs.edit { putBoolean("auto_connect", true) }
-        if (wake && foreground) {
-            connectionJob?.cancel()
-            connectionJob = null
-            if (initialized) client.close()
-            connected = false
-            resetConnectionState()
-        }
+        if (wake && foreground) closeConnection()
         if (!foreground || (connectionJob?.isActive == true)) return
         connectionJob = viewModelScope.launch {
             var wakePending = wake
