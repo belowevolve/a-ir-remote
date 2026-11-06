@@ -146,7 +146,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                     val target = pendingHost ?: devices.firstOrNull { it.address == selection.address }
                         ?: pluggedDevice?.takeIf { selection.accepts(it.address) }
                     target?.let(::connect)
-                } else connectionError = ""
+                }
             }
         }
 
@@ -219,7 +219,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 }
                 else -> null
             }
-            if (report != null) hid?.replyReport(device, type, id, if (bufferSize > 0) report.take(bufferSize).toByteArray() else report)
+            if (report != null) hid?.replyReport(device, type, id, if (bufferSize in 1 until report.size) report.copyOf(bufferSize) else report)
             else hid?.reportError(device, BluetoothHidDevice.ERROR_RSP_INVALID_RPT_ID)
         }
 

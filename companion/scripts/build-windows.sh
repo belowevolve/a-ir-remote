@@ -13,4 +13,5 @@ mkdir -p target/bundle/vbcable
 unzip -qo "$archive" -d target/bundle/vbcable
 cargo build --locked --release --target x86_64-pc-windows-gnu
 python3 scripts/collect-notices.py
-makensis -V2 installer/setup.nsi
+companion_version=$(cargo pkgid --locked)
+makensis -V2 "-DVERSION=${companion_version##*@}" installer/setup.nsi

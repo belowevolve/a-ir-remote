@@ -75,8 +75,8 @@ class MicTransportTest {
                 Socket("127.0.0.1", server.localPort).use { client ->
                     client.soTimeout = 3000
                     MicTransport.handshake(client.getInputStream(), client.getOutputStream())
-                    MicTransport.write(client.getOutputStream(), MicTransport.frame(floatArrayOf(-1f, 1f), 2, false, false))
-                    MicTransport.write(client.getOutputStream(), MicTransport.frame(FloatArray(480) { 0.25f }, 480, false, true))
+                    client.getOutputStream().write(MicTransport.frame(floatArrayOf(-1f, 1f), 2, false, false))
+                    client.getOutputStream().write(MicTransport.frame(FloatArray(480) { 0.25f }, 480, false, true))
                 }
                 val packets = received.get(4, TimeUnit.SECONDS)
                 assertEquals(48_000, packets[0].sampleRate)

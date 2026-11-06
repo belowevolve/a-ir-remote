@@ -44,7 +44,7 @@ class TvClient(private val identity: TvIdentity) {
             s.connect(InetSocketAddress(host, port), if (port == 6465) 1500 else 5000)
             s.startHandshake()
             s
-        } catch (e: Exception) { s.close(); throw e }
+        } catch (e: Exception) { runCatching { s.close() }; throw e }
         finally { synchronized(connectionLock) { connectingSockets.remove(s) } }
     }
     
@@ -133,8 +133,9 @@ class TvClient(private val identity: TvIdentity) {
                 onVoiceRequest(false)
                 onKeyboard(keyboard.snapshot())
             }
+            val input = s.inputStream.buffered()
             while (!s.isClosed) {
-                val msg = RemoteMessage.parseDelimitedFrom(s.inputStream) ?: throw EOFException("Соединение с ТВ закрыто")
+                val msg = RemoteMessage.parseDelimitedFrom(input) ?: throw EOFException("Соединение с ТВ закрыто")
                 if (Log.isLoggable(IME_TAG, Log.DEBUG)) {
                     if (msg.hasRemoteImeKeyInject()) {
                         val ime = msg.remoteImeKeyInject
@@ -256,10 +257,10 @@ class TvClient(private val identity: TvIdentity) {
 
     fun isVoiceActive(id: Int): Boolean = synchronized(writeLock) { voice.active == id }
 
-    fun audio(id: Int, bytes: ByteArray) = synchronized(writeLock) {
+    fun audio(id: Int, bytes: ByteArray, count: Int) = synchronized(writeLock) {
         if (voice.active != id) return@synchronized
-        require(bytes.size in 1..(20 * 1024))
-        send(RemoteVoiceClientMessage.newBuilder().setRemoteVoicePayload(ByteString.copyFrom(bytes)).build())
+        require(count in 1..minOf(bytes.size, 20 * 1024))
+        send(RemoteVoiceClientMessage.newBuilder().setRemoteVoicePayload(ByteString.copyFrom(bytes, 0, count)).build())
     }
 
     fun endVoice(id: Int) = synchronized(writeLock) {

@@ -552,7 +552,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 while (currentCoroutineContext().isActive && client.isVoiceActive(id) && android.os.SystemClock.elapsedRealtime() < deadline) {
                     val count = input.read(buffer, 0, buffer.size)
                     check(count > 0) { "Ошибка записи микрофона: $count" }
-                    client.audio(id, buffer.copyOf(count))
+                    client.audio(id, buffer, count)
                 }
             } finally {
                 recorder?.let { runCatching { it.stop() }; it.release() }

@@ -5,7 +5,7 @@ use anyhow::{bail, Result};
 use cpal::traits::StreamTrait;
 use cpal::traits::{DeviceTrait, HostTrait};
 use prost::Message;
-use rtrb::{Consumer, Producer, RingBuffer};
+use rtrb::{Consumer, RingBuffer};
 use std::{
     io::{Read, Write},
     sync::{
@@ -195,7 +195,7 @@ pub fn receive(
     output: &str,
     dropped: Arc<AtomicU64>,
 ) -> Result<()> {
-    let (mut producer, consumer): (Producer<f32>, _) = RingBuffer::new(RATE / 5);
+    let (mut producer, consumer) = RingBuffer::new(RATE / 5);
     #[cfg(windows)]
     let playback =
         crate::windows_audio::Playback::start(output, Playout::new(consumer, dropped.clone()))?;
@@ -210,6 +210,7 @@ pub fn receive(
     connection.flush()?;
     #[cfg(not(windows))]
     playback.play()?;
+    let mut packet = Vec::new();
     loop {
         #[cfg(windows)]
         playback.check()?;
@@ -219,7 +220,7 @@ pub fn receive(
         if !(1..=16_384).contains(&length) {
             bail!("Audio frame too large");
         }
-        let mut packet = vec![0; length];
+        packet.resize(length, 0);
         connection.read_exact(&mut packet)?;
         for sample in decode(&packet)? {
             if producer.push(sample).is_err() {

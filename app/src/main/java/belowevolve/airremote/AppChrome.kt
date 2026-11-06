@@ -41,19 +41,19 @@ internal fun AppHeader(
 }
 
 private data class ModeItem(val icon: ImageVector, val label: String)
+private val modeItems = listOf(
+    ModeItem(Icons.Rounded.Tv, "ТВ"),
+    ModeItem(Icons.Rounded.Computer, "ПК"),
+    ModeItem(Icons.Rounded.Mic, "Микрофон"),
+)
 
 @Composable
 internal fun ModeTabs(selected: Int, onSelected: (Int) -> Unit) {
-    val items = listOf(
-        ModeItem(Icons.Rounded.Tv, "ТВ"),
-        ModeItem(Icons.Rounded.Computer, "ПК"),
-        ModeItem(Icons.Rounded.Mic, "Микрофон"),
-    )
     Row(
         modifier = Modifier.padding(horizontal = RemoteLayout.ScreenPadding),
         horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
     ) {
-        items.forEachIndexed { index, item ->
+        modeItems.forEachIndexed { index, item ->
             Surface(
                 onClick = { onSelected(index) },
                 modifier = Modifier.weight(if (index == 2) 1.35f else 1f),

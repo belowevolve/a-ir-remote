@@ -30,6 +30,7 @@ private val numpadRows = listOf(
     listOf("Esc" to 41, "Tab" to 43, "Menu" to 101, "1" to 89, "2" to 90, "3" to 91, "Enter" to 88),
     listOf("Shift" to -2, "Space" to 44, "0" to 98, "." to 99, "Enter" to 88),
 )
+private val repeatKeys = setOf(42, 75, 76, 78)
 
 @Composable
 internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = KeyboardLayout.KeyHeight, numpad: Boolean = false, landscape: Boolean = false, toolbar: @Composable () -> Unit = {}) {
@@ -40,10 +41,10 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
                     row.forEach { (label, code) ->
                         PcKey(
                             label = if (numpad) label else pcKeyLabel(label, russian, (model.modifiers and 2) != 0, model.capsLock),
-                            modifier = Modifier.weight(if (numpad) { if (code == 44 || code == 98) 2f else 1f } else if (label.length > 1 && label !in listOf("Esc", "Del") && !label.startsWith("F")) 1.3f else 1f),
+                            modifier = Modifier.weight(if (numpad) { if (code == 44 || code == 98) 2f else 1f } else if (label.length > 1 && label != "Esc" && label != "Del" && !label.startsWith("F")) 1.3f else 1f),
                             enabled = model.connected,
                             selected = ((code == -2) && ((model.modifiers and 2) != 0)) || (code == 57 && model.capsLock),
-                            repeatOnHold = code in listOf(42, 75, 76, 78),
+                            repeatOnHold = code in repeatKeys,
                         ) {
                             if (code == -2) model.toggleModifier(2) else model.key(code)
                         }

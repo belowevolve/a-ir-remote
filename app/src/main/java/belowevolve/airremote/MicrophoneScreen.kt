@@ -31,14 +31,14 @@ import kotlin.math.sqrt
 fun MicrophoneScreen(model: PcRemoteModel, beforeStart: () -> Unit) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("microphone", Context.MODE_PRIVATE) }
-    val companion = if (model.hasCompanion) CompanionEndpoint.load(context) else null
+    val host = model.companionHost
     var pairing by rememberSaveable { mutableStateOf(false) }
     var natural by rememberSaveable { mutableStateOf(!preferences.getBoolean("speech", true)) }
     var error by rememberSaveable { mutableStateOf("") }
     val state by MicrophoneService.status.collectAsState()
     if (pairing) CompanionDialog(model) { pairing = false }
     fun start() {
-        if (companion == null) { pairing = true; return }
+        if (host == null) { pairing = true; return }
         try {
             beforeStart()
             MicrophoneService.start(context, natural)
@@ -64,7 +64,7 @@ fun MicrophoneScreen(model: PcRemoteModel, beforeStart: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
     ) {
         AppHeader(
-            title = companion?.host ?: "Микрофон",
+            title = host ?: "Микрофон",
             actionIcon = Icons.Rounded.Devices,
             actionDescription = "Подключить ПК",
             onAction = { pairing = true },
@@ -101,14 +101,14 @@ fun MicrophoneScreen(model: PcRemoteModel, beforeStart: () -> Unit) {
                     shape = RemoteLayout.ActionShape,
                     enabled = !state.active,
                     onClick = {
-                        if (companion == null) { pairing = true; return@Button }
+                        if (host == null) { pairing = true; return@Button }
                         permissions.launch(buildList {
                             add(Manifest.permission.RECORD_AUDIO)
                             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
                             if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
                         }.toTypedArray())
                     },
-                ) { Text(if (state.active) "Подключение…" else if (companion == null) "Подключить ПК" else "Включить микрофон") }
+                ) { Text(if (state.active) "Подключение…" else if (host == null) "Подключить ПК" else "Включить микрофон") }
             }
             if (state.active) {
                 RemoteButton(

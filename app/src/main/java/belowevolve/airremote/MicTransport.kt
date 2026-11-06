@@ -1,6 +1,7 @@
 package belowevolve.airremote
 
 import com.google.protobuf.ByteString
+import com.google.protobuf.CodedOutputStream
 import belowevolve.airremote.mic.MicrophoneProtocol
 import java.io.DataInputStream
 import java.io.InputStream
@@ -37,9 +38,10 @@ internal object MicTransport {
         }
         val message = MicrophoneProtocol.AudioPacket.newBuilder()
             .setBuffer(ByteString.copyFrom(pcm.array())).setSampleRate(RATE)
-            .setChannelCount(1).setAudioFormat(if (pcmFloat) 4 else 2).build().toByteArray()
-        return ByteBuffer.allocate(4 + message.size).putInt(message.size).put(message).array()
+            .setChannelCount(1).setAudioFormat(if (pcmFloat) 4 else 2).build()
+        val size = message.serializedSize
+        val frame = ByteBuffer.allocate(4 + size).putInt(size).array()
+        message.writeTo(CodedOutputStream.newInstance(frame, 4, size))
+        return frame
     }
-
-    fun write(output: OutputStream, frame: ByteArray) { output.write(frame) }
 }

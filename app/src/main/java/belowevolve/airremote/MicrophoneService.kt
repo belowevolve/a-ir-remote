@@ -240,7 +240,7 @@ class MicrophoneService : Service() {
                         continue
                     }
                     val samples = frame.samples
-                    MicTransport.write(output, MicTransport.frame(samples, samples.size, mutableStatus.value.muted, floatPcm))
+                    output.write(MicTransport.frame(samples, samples.size, mutableStatus.value.muted, floatPcm))
                     progress.set(SystemClock.elapsedRealtime())
                     val writeMs = (System.nanoTime() - writeStarted) / 1_000_000
                     if (diagnostics && (++framesWritten % 100 == 0 || writeMs >= 100)) {

@@ -39,7 +39,7 @@ internal fun PcScreen(model: PcRemoteModel, landscape: Boolean = false) {
     var launchError by remember { mutableStateOf("") }
     var companionVisible by rememberSaveable { mutableStateOf(false) }
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
-    val bluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { model.start(); model.refreshDevices() }
+    val bluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { model.start() }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (model.hasPermission()) { model.start(); devicesVisible = true } else model.permissionDenied()
     }
@@ -164,7 +164,7 @@ internal fun PcScreen(model: PcRemoteModel, landscape: Boolean = false) {
                             permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
                         else { model.preparePairing(); launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)) }
                     }) { Text("Видимость · 2 мин") }
-                    OutlinedButton(modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = RemoteLayout.Gap), onClick = { model.start(); model.refreshDevices() }) { Text("Обновить") }
+                    OutlinedButton(modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = RemoteLayout.Gap), onClick = model::start) { Text("Обновить") }
                 }
                 if (launchError.isNotEmpty()) Text(launchError)
                 DialogActionGroup {

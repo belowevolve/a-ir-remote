@@ -13,19 +13,15 @@ android {
         minSdk = 28
         targetSdk = 37
         testInstrumentationRunner = "belowevolve.airremote.InputRegressionRunner"
-        versionCode = 36
-        versionName = "0.1.35"
+        versionCode = 37
+        versionName = "0.1.36"
+        resValue("string", "app_name", "Air Remote")
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
         resValues = true
-    }
-
-    sourceSets {
-        getByName("debug").java.directories += "build/generated/java/generateDebugProto/java"
-        getByName("release").java.directories += "build/generated/java/generateReleaseProto/java"
     }
 
     packaging {
@@ -45,18 +41,18 @@ android {
     }
 
     buildTypes {
-        debug {
-            applicationIdSuffix = ".dev"
-            versionNameSuffix = "-dev"
-            resValue("string", "app_name", "Air Remote Dev")
-        }
         release {
-            resValue("string", "app_name", "Air Remote")
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+    }
+}
+
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    variant.outputs.forEach { output ->
+        output.outputFileName.set(output.versionName.map { "Air-Remote-$it.apk" })
     }
 }
 

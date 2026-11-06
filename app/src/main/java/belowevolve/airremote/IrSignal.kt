@@ -3,21 +3,21 @@ package belowevolve.airremote
 object IrSignal {
     // Profile verified with this TV; unknown models must use network power.
     fun powerFor(deviceName: String): Pair<Int, IntArray>? = when (deviceName.trim().lowercase()) {
-        "haier android tv pro" -> parse(haierPower())
+        "haier android tv pro" -> haierPower
         else -> null
     }
 
-    private fun haierPower(): String {
-        val durations = mutableListOf(9000, 4500)
+    private val haierPower = 38000 to buildList {
+        add(9000)
+        add(4500)
         for (byte in listOf(0x04, 0xfb, 0x08, 0xf7)) {
             repeat(8) { bit ->
-                durations.add(560)
-                durations.add(if ((byte and (1 shl bit)) != 0) 1690 else 560)
+                add(560)
+                add(if ((byte and (1 shl bit)) != 0) 1690 else 560)
             }
         }
-        durations.add(560)
-        return "38000 " + durations.joinToString(" ")
-    }
+        add(560)
+    }.toIntArray()
 
     fun parse(value: String): Pair<Int, IntArray> {
         val numbers = value.trim().split(Regex("[\\s,;]+")).map {
