@@ -3,7 +3,6 @@ package belowevolve.airremote
 import com.google.protobuf.ByteString
 import belowevolve.airremote.mic.MicrophoneProtocol
 import java.io.DataInputStream
-import java.io.DataOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
@@ -42,5 +41,5 @@ internal object MicTransport {
         return ByteBuffer.allocate(4 + message.size).putInt(message.size).put(message).array()
     }
 
-    fun write(output: OutputStream, frame: ByteArray) { DataOutputStream(output).write(frame) }
+    fun write(output: OutputStream, frame: ByteArray) { output.write(frame) }
 }

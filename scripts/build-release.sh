@@ -3,23 +3,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 umask 077
-
-if [[ ! -d .signing ]]; then
-    command -v keytool >/dev/null || { echo "Install a JDK with keytool first." >&2; exit 1; }
-    command -v openssl >/dev/null || { echo "Install openssl first." >&2; exit 1; }
-    mkdir .signing
-    openssl rand -base64 32 > .signing/password
-    keytool -genkeypair -keystore .signing/release.p12 -storetype PKCS12 \
-        -storepass:file .signing/password -keypass:file .signing/password \
-        -alias air-remote -keyalg RSA -keysize 3072 -validity 10000 \
-        -dname "CN=Air Remote" -noprompt
-    echo "Release key created. Back up .signing/ securely; future updates need this key."
+# Android Studio bundles the JDK used by Gradle; also use it for keytool/apksigner.
+if [[ -z "${JAVA_HOME:-}" && -x '/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java' ]]; then
+    export JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home'
+    export PATH="$JAVA_HOME/bin:$PATH"
 fi
+command -v python3 >/dev/null || { echo "Install Python 3 first." >&2; exit 1; }
 
 if [[ ! -s .signing/release.p12 || ! -s .signing/password ]]; then
-    echo "Incomplete .signing/. Restore its key and password from backup; no key was replaced." >&2
+    echo "Restore .signing/release.p12 and .signing/password from backup; updates require the original key." >&2
     exit 1
 fi
 
-./gradlew assembleRelease "$@"
-echo "Signed APK: app/build/outputs/apk/release/app-release.apk"
+./gradlew testDebugUnitTest lintDebug assembleRelease "$@"
+python3 scripts/prepare-release.py

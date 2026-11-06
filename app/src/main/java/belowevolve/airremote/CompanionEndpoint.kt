@@ -2,6 +2,7 @@ package belowevolve.airremote
 
 import android.content.Context
 import android.net.Network
+import androidx.core.content.edit
 import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.URI
@@ -61,9 +62,9 @@ internal data class CompanionEndpoint(val host: String, val port: Int, val finge
         fun load(context: Context): CompanionEndpoint? = context.getSharedPreferences("companion", Context.MODE_PRIVATE)
             .getString("endpoint", null)?.let { runCatching { parse(it) }.getOrNull() }
         fun save(context: Context, endpoint: CompanionEndpoint?) {
-            context.getSharedPreferences("companion", Context.MODE_PRIVATE).edit().apply {
+            context.getSharedPreferences("companion", Context.MODE_PRIVATE).edit {
                 if (endpoint == null) remove("endpoint") else putString("endpoint", endpoint.code())
-            }.apply()
+            }
         }
         fun readLine(input: InputStream): String {
             val result = java.io.ByteArrayOutputStream()

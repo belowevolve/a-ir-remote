@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.Socket
+import kotlin.coroutines.EmptyCoroutineContext
 
 internal class CompanionClient(
     private val context: Context,
@@ -37,9 +38,10 @@ internal class CompanionClient(
                             }
                         }
                         try {
+                            val input = connection.inputStream.buffered()
                             withContext(Dispatchers.Main) { if (generation == current) { onConnecting(false); onStatus(true, null) } }
                             while (isActive) {
-                                val state = JSONObject(CompanionEndpoint.readLine(connection.inputStream))
+                                val state = JSONObject(CompanionEndpoint.readLine(input))
                                 if (state.has("language")) withContext(Dispatchers.Main) {
                                     if (generation == current) onLayout(state.getString("language"))
                                 }
@@ -61,7 +63,7 @@ internal class CompanionClient(
             socket.also { socket = null }
         }
         job?.cancel(); job = null
-        CoroutineScope(Dispatchers.IO).launch { runCatching { old?.close() } }
+        Dispatchers.IO.dispatch(EmptyCoroutineContext) { runCatching { old?.close() } }
         onConnecting(false)
         onStatus(false, null)
     }

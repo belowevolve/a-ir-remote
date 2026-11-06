@@ -3,6 +3,7 @@ package belowevolve.airremote
 import android.Manifest
 import android.content.pm.PackageManager
 import android.view.ScaleGestureDetector
+import android.view.MotionEvent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -90,6 +91,7 @@ internal fun CompanionScanner(onCode: (String) -> Unit, onManualCode: () -> Unit
                             setOnTouchListener { view, event ->
                                 view.parent?.requestDisallowInterceptTouchEvent(event.pointerCount > 1)
                                 scale.onTouchEvent(event)
+                                if (event.actionMasked == MotionEvent.ACTION_UP) view.performClick()
                                 true
                             }
                         }

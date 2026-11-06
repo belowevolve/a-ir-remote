@@ -18,4 +18,10 @@ class CompanionEndpointTest {
         assertEquals("AirRemoteA2", input.readBytes().toString(Charsets.UTF_8))
     }
     @Test fun boundsServerMessages() { assertThrows(java.io.IOException::class.java) { CompanionEndpoint.readLine(ByteArrayInputStream(ByteArray(4097) { 65 })) } }
+    @Test fun bufferedControlKeepsFollowingMessages() {
+        val input = ByteArrayInputStream("{\"language\":\"ru\"}\n{\"ping\":true}\n".toByteArray()).buffered()
+        assertEquals("{\"language\":\"ru\"}", CompanionEndpoint.readLine(input))
+        assertEquals("{\"ping\":true}", CompanionEndpoint.readLine(input))
+        assertThrows(java.io.EOFException::class.java) { CompanionEndpoint.readLine(input) }
+    }
 }

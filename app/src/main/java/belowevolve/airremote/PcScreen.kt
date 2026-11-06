@@ -154,7 +154,7 @@ internal fun PcScreen(model: PcRemoteModel, landscape: Boolean = false) {
                 HorizontalDivider()
                 Text("Bluetooth · клавиатура и мышь", style = MaterialTheme.typography.titleSmall)
                 if (!model.hasPermission()) TextButton(onClick = {
-                    if (Build.VERSION.SDK_INT >= 31) permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
+                    permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
                 }) { Text("Разрешить Bluetooth") }
                 if (model.connectionError.isNotBlank()) Text(model.connectionError, color = MaterialTheme.colorScheme.error)
                 if (model.bluetoothState == BluetoothAdapter.STATE_OFF) TextButton(onClick = { launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }) { Text("Включить Bluetooth") }

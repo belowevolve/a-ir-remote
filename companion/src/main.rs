@@ -30,7 +30,9 @@ fn run() -> anyhow::Result<()> {
     let app = server::App::new(identity::Identity::load()?)?;
     server::start(app.clone())?;
     #[cfg(windows)]
-    windows_ui::run(app)?;
+    {
+        windows_ui::run(app)
+    }
     #[cfg(not(windows))]
     {
         eprintln!("Air Remote: audio receiver on {}:54346. Keyboard sync and pairing UI currently require Windows.",app.host);
@@ -38,13 +40,14 @@ fn run() -> anyhow::Result<()> {
             std::thread::park();
         }
     }
-    Ok(())
 }
-fn main() {
+fn main() -> std::process::ExitCode {
     if let Err(error) = run() {
         #[cfg(windows)]
         windows_ui::error(&format!("{error:#}"));
         #[cfg(not(windows))]
         eprintln!("{error:#}");
+        return std::process::ExitCode::FAILURE;
     }
+    std::process::ExitCode::SUCCESS
 }
