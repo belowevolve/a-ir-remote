@@ -23,6 +23,7 @@ class TvClient(private val identity: TvIdentity) {
     private var pairingHost = ""
     private var features = 0
     private val voice = TvVoiceSession()
+    private val power = TvPowerSession()
     private val writeLock = Any()
     private val connectionLock = Any()
     private val connectingSockets = mutableSetOf<SSLSocket>()
@@ -93,6 +94,7 @@ class TvClient(private val identity: TvIdentity) {
     fun close() {
         val closing = synchronized(connectionLock) {
             connectionVersion++
+            power.reset()
             (connectingSockets.toList() + listOfNotNull(socket)).also {
                 connectingSockets.clear()
                 socket = null
@@ -125,6 +127,7 @@ class TvClient(private val identity: TvIdentity) {
             }
             synchronized(writeLock) {
                 if (socket !== s) throw CancellationException("Соединение отменено")
+                power.reset()
                 keyboard.reset()
                 voice.reset()
                 onVoiceRequest(false)
@@ -162,6 +165,13 @@ class TvClient(private val identity: TvIdentity) {
                     msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
                     msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
                     msg.hasRemoteStart() -> {
+                        val current = synchronized(writeLock) {
+                            if (socket !== s) false else {
+                                if ((features and 32) != 0) power.update(msg.remoteStart.started)
+                                true
+                            }
+                        }
+                        if (!current) continue
                         if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power port=$port on=${msg.remoteStart.started}")
                         // The vendor wake endpoint can remain silent while healthy.
                         // The normal control endpoint sends heartbeats, so retain
@@ -213,9 +223,17 @@ class TvClient(private val identity: TvIdentity) {
         }
     }
     
-    fun sendKey(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) {
+    suspend fun ensureAwake() = power.ensureAwake { sendKey(26) }
+
+    fun prepareExternalWake(): CompletableDeferred<Unit>? = power.explicitWakeSent()
+
+    fun externalWakeFailed(pending: CompletableDeferred<Unit>?, error: Exception) = power.failed(pending, error)
+
+    fun sendKey(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) = synchronized(writeLock) {
         if (code == 26 && Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power key port=${socket?.port} direction=$direction")
         send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
+        if ((code == 26 || code == 177) && direction == RemoteDirection.SHORT) power.explicitWakeSent()
+        Unit
     }
     
     fun launchAppLink(link: String) {

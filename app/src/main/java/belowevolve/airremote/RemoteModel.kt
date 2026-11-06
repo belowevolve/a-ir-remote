@@ -58,7 +58,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var connectionGeneration = 0L
     private var networkPowerHeld = false
 
-    private data class TvCommand(val generation: Long, val action: TvClient.() -> Unit)
+    private data class TvCommand(val generation: Long, val wake: Boolean, val action: TvClient.() -> Unit)
     private val commands = Channel<TvCommand>(Channel.UNLIMITED)
 
     val devices = mutableStateListOf<Pair<String, String>>()
@@ -102,11 +102,15 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 if (!connected || (command.generation != connectionGeneration)) continue
                 try {
                     withContext(Dispatchers.IO) {
-                        if (command.generation == connectionGeneration) command.action(client)
+                        if (command.generation == connectionGeneration) {
+                            if (command.wake) client.ensureAwake()
+                            if (command.generation == connectionGeneration) command.action(client)
+                        }
                     }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    if (command.generation != connectionGeneration) continue
                     Log.e("AirRemote", "TV command failed", e)
                     if (e is java.io.IOException) client.close()
                     message = e.message ?: "Не удалось отправить команду на ТВ"
@@ -453,25 +457,25 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     }
 
     // All user commands share one FIFO, including keyboard edits and held-key edges.
-    private fun enqueue(action: TvClient.() -> Unit) {
-        if (connected) commands.trySend(TvCommand(connectionGeneration, action))
+    private fun enqueue(wake: Boolean = true, action: TvClient.() -> Unit) {
+        if (connected) commands.trySend(TvCommand(connectionGeneration, wake, action))
     }
 
     fun holdOk(pressed: Boolean) {
-        enqueue { sendKey(23, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+        enqueue(wake = pressed) { sendKey(23, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
     }
 
     // User actions share the same disconnected-state behavior; the transport only sends packets.
-    private fun sendCommand(action: TvClient.() -> Unit) {
+    private fun sendCommand(wake: Boolean = true, action: TvClient.() -> Unit) {
         if (!connected) {
             message = "ТВ не подключён"
             connect()
             return
         }
-        enqueue(action)
+        enqueue(wake, action)
     }
 
-    fun key(code: Int) = sendCommand { sendKey(code) }
+    fun key(code: Int) = sendCommand(wake = TvPowerSession.shouldWakeBeforeKey(code)) { sendKey(code) }
 
     fun launchYouTube() = sendCommand { launchAppLink("https://www.youtube.com/tv") }
 
@@ -479,7 +483,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (!pressed) {
             if (networkPowerHeld) {
                 networkPowerHeld = false
-                enqueue { sendKey(26, remote.Remotemessage.RemoteDirection.END_LONG) }
+                enqueue(wake = false) { sendKey(26, remote.Remotemessage.RemoteDirection.END_LONG) }
             }
             return
         }
@@ -490,7 +494,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             return
         }
         networkPowerHeld = true
-        enqueue { sendKey(26, remote.Remotemessage.RemoteDirection.START_LONG) }
+        enqueue(wake = false) { sendKey(26, remote.Remotemessage.RemoteDirection.START_LONG) }
     }
 
     fun power() {
@@ -502,7 +506,14 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun powerIr() {
         if (!hasIr) return
         val signal = powerSignal ?: return
-        action { ir.transmit(signal.first, signal.second) }
+        val pending = if (connected && initialized) client.prepareExternalWake() else null
+        action {
+            try { ir.transmit(signal.first, signal.second) }
+            catch (error: Exception) {
+                if (pending != null) client.externalWakeFailed(pending, error)
+                throw error
+            }
+        }
     }
 
     fun startVoice() {
