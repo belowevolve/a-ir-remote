@@ -448,7 +448,9 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 var reconnectAttempts = 0
-                while (isActive) {
+                // A retry delay may finish after the activity has gone to the background.
+                // Keep an existing listen() alive, but only start new sessions while visible.
+                while (isActive && foreground) {
                     status = "Подключение…"
                     val generation = connectionGeneration
                     try {

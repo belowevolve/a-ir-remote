@@ -129,8 +129,22 @@ internal fun Instrumentation.checkTvConnectionLifecycle() {
             val third = tv.awaitSession()
             tv.ready(third)
             await("return after background disconnect") { main { model.get().connected } }
+
+            third.close()
+            await("pause during reconnect backoff") {
+                main {
+                    val remote = model.get()
+                    (!remote.connected && remote.connecting).also { if (it) remote.pause() }
+                }
+            }
+            await("background retry stopped") { main { !model.get().connecting } }
+            check(tv.connections.get() == 3) { "A delayed retry opened a new TV session in background" }
+            main { model.get().resume() }
+            val fourth = tv.awaitSession()
+            tv.ready(fourth)
+            await("return after paused retry") { main { model.get().connected } }
             main { store.clear() }
-            await("ViewModel socket cleanup") { tv.closed.get() == 3 }
+            await("ViewModel socket cleanup") { tv.closed.get() == 4 }
             main {
                 check(!model.get().connected)
                 model.get().key(19)
