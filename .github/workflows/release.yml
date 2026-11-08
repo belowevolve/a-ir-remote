@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.version.outputs.android }}
+      companion: ${{ steps.version.outputs.companion }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_metadata.py --check-existing >> "$GITHUB_OUTPUT"
+
+  android:
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        with:
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
+      - name: Restore APK signing key
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.ANDROID_SIGNING_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          key = os.environ['SIGNING_KEY']
+          password = os.environ['SIGNING_PASSWORD']
+          if not key or not password:
+              raise SystemExit('Configure ANDROID_SIGNING_KEY_BASE64 and ANDROID_SIGNING_PASSWORD')
+          os.umask(0o077)
+          Path('.signing').mkdir(exist_ok=True)
+          Path('.signing/release.p12').write_bytes(base64.b64decode(key, validate=True))
+          Path('.signing/password').write_text(password)
+          PY
+      - name: Test, lint and build signed APK
+        run: ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
+      - name: Stage APK
+        env:
+          VERSION: ${{ needs.version.outputs.android }}
+        run: |
+          mkdir -p dist
+          cp "app/build/outputs/apk/release/Air-Remote-$VERSION.apk" dist/Air-Remote.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify dist/Air-Remote.apk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-android
+          path: dist/Air-Remote.apk
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove signing files
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ('release.p12', 'password'):
+              Path('.signing', name).unlink(missing_ok=True)
+          PY
+
+  companion:
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: companion
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: cargo fmt --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D clippy::all
+      - run: cargo build --locked --release
+      - name: Prepare VB-CABLE bundle
+        run: |
+          New-Item -ItemType Directory -Force target/bundle | Out-Null
+          $archive = 'target/bundle/VBCABLE_Driver_Pack45.zip'
+          Invoke-WebRequest https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb') {
+            throw 'VB-CABLE archive checksum mismatch'
+          }
+          Expand-Archive $archive -DestinationPath target/bundle/vbcable
+      - run: python scripts/collect-notices.py --target x86_64-pc-windows-msvc
+      - name: Build installer
+        env:
+          VERSION: ${{ needs.version.outputs.companion }}
+        run: |
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (!(Test-Path $nsis)) { throw 'NSIS is missing from the Windows runner' }
+          New-Item -ItemType Directory -Force ../artifacts | Out-Null
+          & $nsis /V2 "/DVERSION=$env:VERSION" '/DCOMPANION_BINARY=..\target\release\air-remote-companion.exe' installer/setup.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force ../dist | Out-Null
+          Copy-Item "../artifacts/Air-Companion-Setup-$env:VERSION.exe" ../dist/Air-Companion-Setup.exe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-companion
+          path: dist/Air-Companion-Setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [version, android, companion]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          ANDROID_VERSION: ${{ needs.version.outputs.android }}
+          COMPANION_VERSION: ${{ needs.version.outputs.companion }}
+        run: |
+          test -s dist/Air-Remote.apk
+          test -s dist/Air-Companion-Setup.exe
+          (cd dist && sha256sum Air-Remote.apk Air-Companion-Setup.exe > SHA256SUMS)
+          cat > notes.md <<EOF
+          Air Remote $ANDROID_VERSION · Air Companion $COMPANION_VERSION.
+
+          Android 9+ · Windows 10/11 x64.
+
+          [Скачать пульт](https://github.com/$GH_REPO/releases/download/$TAG/Air-Remote.apk) · [Скачать компаньон](https://github.com/$GH_REPO/releases/download/$TAG/Air-Companion-Setup.exe)
+
+          [Подключение и описание](https://github.com/$GH_REPO#readme) · [Микрофон](https://github.com/$GH_REPO/blob/master/docs/microphone.md)
+          EOF
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "Release $TAG is already published."
+              exit 0
+            fi
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --draft --title "Air Remote $ANDROID_VERSION" --notes-file notes.md
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          gh release edit "$TAG" --draft=false --latest --notes-file notes.md

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Collect dependency copyright and license texts into the distributable."""
-import json, subprocess
+import argparse, json, subprocess
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
-metadata=json.loads(subprocess.check_output(['cargo','metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-gnu'],cwd=root))
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--target',default='x86_64-pc-windows-gnu')
+args=parser.parse_args()
+metadata=json.loads(subprocess.check_output(['cargo','metadata','--locked','--format-version','1','--filter-platform',args.target],cwd=root))
 active={n['id'] for n in metadata['resolve']['nodes']}
 parts=['Air Companion — third-party notices\n']
 for package in sorted(metadata['packages'],key=lambda p:p['name']):

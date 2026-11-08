@@ -6,6 +6,9 @@ Unicode true
 !ifndef VERSION
   !error "Build with scripts/build-windows.sh"
 !endif
+!ifndef COMPANION_BINARY
+  !define COMPANION_BINARY "..\target\x86_64-pc-windows-gnu\release\air-remote-companion.exe"
+!endif
 Name "Air Companion"
 OutFile "..\..\artifacts\Air-Companion-Setup-${VERSION}.exe"
 InstallDir "$PROGRAMFILES64\Air Remote"
@@ -62,7 +65,7 @@ Section "Air Companion: раскладка и буфер обмена" Core
     Delete "$SMSTARTUP\Air Remote.lnk"
   SetOutPath "$INSTDIR"
   ClearErrors
-  File "..\target\x86_64-pc-windows-gnu\release\air-remote-companion.exe"
+  File "${COMPANION_BINARY}"
   ${If} ${Errors}
     MessageBox MB_OK|MB_ICONSTOP "Не удалось обновить Air Companion. Закройте приложение и повторите установку." /SD IDOK
     SetErrorLevel 1
