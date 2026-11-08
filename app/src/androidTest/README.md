@@ -20,3 +20,5 @@ adb -s PHONE shell am instrument -w -r -e modalFixture true \
 `PcNativeImeRunner` и `InputRegressionRunner` проверяют настоящий ввод и могут отправлять команды устройствам: используйте подготовленные тестовые поля и явные параметры сценария в исходниках.
 
 `ScreenPreviewRunner` снимает содержимое окна без системных панелей, шириной до 720 px. Аргумент `screenPreview`: `tv`, `pc`, `pc-collapsed`, `mic`. Снимки сохраняются в `files/screen-previews/` приложения.
+
+Без соединения с ПК доступен снимок исходной развёрнутой клавиатуры (`pc`). Для `pc-collapsed` сначала подключите ПК.

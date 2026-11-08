@@ -59,18 +59,23 @@ final class ScreenPreviewCapture {
         automation.setServiceInfo(service);
         click(awaitNode(5_000, label));
 
+        boolean pcControlsAvailable = true;
         if ("pc".equals(mode) || "pc-collapsed".equals(mode)) {
             String show = "Показать клавиатуру";
             String hide = "Скрыть клавиатуру";
-            AccessibilityNodeInfo toggle = awaitNode(5_000, show, hide);
-            String action = "pc-collapsed".equals(mode) ? hide : show;
-            if (hasLabel(toggle, action)) click(toggle);
-            awaitNode(5_000, "pc-collapsed".equals(mode) ? show : hide);
+            awaitNode(5_000, show, hide, "Подключить ПК");
+            AccessibilityNodeInfo toggle = find(ownRoot(), new String[] {show, hide});
+            pcControlsAvailable = toggle != null;
+            if (pcControlsAvailable) {
+                String action = "pc-collapsed".equals(mode) ? hide : show;
+                if (hasLabel(toggle, action)) click(toggle);
+                awaitNode(5_000, "pc-collapsed".equals(mode) ? show : hide);
+            } else require("pc".equals(mode), "Connect a PC before capturing its collapsed keyboard");
         }
         // A live meter or PiP may continue producing accessibility events. The bounded
         // idle timeout does not prevent copying our own window's current frame.
         try { automation.waitForIdle(300, 3_000); } catch (TimeoutException ignored) { }
-        if ("pc".equals(mode) || "pc-collapsed".equals(mode)) awaitPcLayout(mode);
+        if (pcControlsAvailable && ("pc".equals(mode) || "pc-collapsed".equals(mode))) awaitPcLayout(mode);
         View decor = activity.getWindow().getDecorView();
         // OnDraw runs before RenderThread submits the buffer. A posted main-thread
         // task alone can therefore still copy the previous frame.
@@ -86,7 +91,7 @@ final class ScreenPreviewCapture {
             int left = 0, top = 0, right = 0, bottom = 0;
             if (insets != null) {
                 if (Build.VERSION.SDK_INT >= 30) {
-                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
                     left = bars.left; top = bars.top; right = bars.right; bottom = bars.bottom;
                 } else {
                     left = insets.getSystemWindowInsetLeft(); top = insets.getSystemWindowInsetTop();
@@ -96,33 +101,40 @@ final class ScreenPreviewCapture {
             source.set(left, top, decor.getWidth() - right, decor.getHeight() - bottom);
         });
         require(!source.isEmpty(), "App content has no visible bounds");
-        int width = Math.min(source.width(), 720);
-        int height = Math.round(source.height() * (width / (float) source.width()));
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        // Copy at the surface's native size before cropping. Some emulator GPU
+        // backends omit layers when PixelCopy crops and scales in a single request.
+        Bitmap bitmap = Bitmap.createBitmap(decor.getWidth(), decor.getHeight(), Bitmap.Config.ARGB_8888);
+        Bitmap preview = null;
         LinkedBlockingQueue<Integer> completion = new LinkedBlockingQueue<>(1);
         boolean callbackReceived = false;
         try {
-            instrumentation.runOnMainSync(() -> PixelCopy.request(activity.getWindow(), source, bitmap,
+            instrumentation.runOnMainSync(() -> PixelCopy.request(activity.getWindow(), bitmap,
                     code -> completion.offer(code), new Handler(Looper.getMainLooper())));
             Integer code = completion.poll(5, TimeUnit.SECONDS);
             callbackReceived = code != null;
             require(code != null && code == PixelCopy.SUCCESS,
                     "Window PixelCopy failed (result=" + (code == null ? "callback_timeout" : code) + ")");
+            Bitmap cropped = Bitmap.createBitmap(bitmap, source.left, source.top, source.width(), source.height());
+            int width = Math.min(source.width(), 720);
+            int height = Math.round(source.height() * (width / (float) source.width()));
+            preview = Bitmap.createScaledBitmap(cropped, width, height, true);
+            if (cropped != bitmap && cropped != preview) cropped.recycle();
             File folder = instrumentation.getTargetContext().getExternalFilesDir("screen-previews");
             require(folder != null && (folder.isDirectory() || folder.mkdirs()), "Preview directory unavailable");
             File target = new File(folder, "screen-" + mode + ".png");
             File temporary = new File(folder, "screen-" + mode + ".part");
             try {
                 try (FileOutputStream output = new FileOutputStream(temporary)) {
-                    require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output), "PNG encoding failed");
+                    require(preview.compress(Bitmap.CompressFormat.PNG, 100, output), "PNG encoding failed");
                 }
                 Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
             } finally { temporary.delete(); }
             result.putString("previewPath", target.getAbsolutePath());
             result.putString("previewSync", frameCommit ? "two_frame_commits" : "two_draws_fallback");
-            result.putString("stream", "SCREEN_PREVIEW " + mode + ": " + bitmap.getWidth() + "x"
-                    + bitmap.getHeight() + "; " + target.getAbsolutePath() + "\n");
+            result.putString("stream", "SCREEN_PREVIEW " + mode + ": " + preview.getWidth() + "x"
+                    + preview.getHeight() + "; " + target.getAbsolutePath() + "\n");
         } finally {
+            if (preview != null && preview != bitmap) preview.recycle();
             // A timed-out request may still own its destination; let that reference be
             // collected after its callback instead of recycling it during a GPU copy.
             if (callbackReceived) bitmap.recycle();
