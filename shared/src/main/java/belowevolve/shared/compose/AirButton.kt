@@ -47,7 +47,7 @@ fun AirButton(
   val background =
     animateColorAsState(
       if (focused || selected) focusedColor else color,
-      animationSpec = tween(120, easing = FastOutSlowInEasing),
+      animationSpec = tween(100, easing = FastOutSlowInEasing),
       label = "action color",
     )
   CompositionLocalProvider(

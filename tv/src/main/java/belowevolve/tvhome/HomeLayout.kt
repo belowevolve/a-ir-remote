@@ -17,6 +17,7 @@ class HomeLayout(c: Context) {
   val posterWidth: Int
   val posterHeight: Int
   val glow: Int
+  val shadow: Int
   val showTitle: Boolean
 
   init {
@@ -27,6 +28,7 @@ class HomeLayout(c: Context) {
     posterWidth = cardWidth(size, gap)
     posterHeight = (posterWidth * 1.5f).roundToInt()
     glow = clamp(p.getInt("poster_glow", 100), 0, 100)
+    shadow = clamp(p.getInt("poster_shadow", 0), 0, PosterShadow.NAMES.lastIndex)
     bottom = clamp(p.getInt("bottom_inset", 32), 24, 160)
     posterTop = if (mode == 0) 194 else 540 - bottom - posterHeight
     rowTop = posterTop - 16

@@ -6,9 +6,6 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -24,7 +21,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.PlatformTextStyle
@@ -32,6 +28,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.viewinterop.AndroidView
 import belowevolve.shared.compose.AirButton
 import belowevolve.shared.design.PosterBadgeSpec
 import belowevolve.shared.design.RemoteIcons
@@ -140,8 +137,6 @@ internal fun TvHeader(title: String, onBack: () -> Unit, modifier: Modifier = Mo
       onBack,
       Modifier.size(44.dp),
       shape = CircleShape,
-      focusedColor = MaterialTheme.colorScheme.primaryContainer,
-      focusedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
       contentPadding = PaddingValues(0.dp),
     ) {
       Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -242,7 +237,6 @@ internal fun PosterCard(
   modifier: Modifier = Modifier,
   preview: Boolean = false,
   previewFocused: Boolean = false,
-  pivot: Float = .5f,
   onFocus: () -> Unit = {},
   onClick: () -> Unit = {},
 ) {
@@ -259,17 +253,32 @@ internal fun PosterCard(
       label = "poster focus",
     )
   val shape = RoundedCornerShape((12f * layout.posterWidth / HomeLayout.PosterWidth).dp)
+  val description =
+    remember(art.program) {
+      listOf(art.program.title, SelectionCaption.description(art.program.image))
+        .filter { it.isNotEmpty() }
+        .joinToString(", ")
+    }
   val image = art.bitmap
   val wide = style.mode == 2 && style.mat == 1
   val shadow by
-    produceState(PosterShadow.cached(art.accent, wide), art.accent, wide) {
-      value = withContext(Dispatchers.Default) { PosterShadow.load(art.accent, wide) }
+    produceState(
+      PosterShadow.cached(art.accent, wide, layout.shadow),
+      art.accent,
+      wide,
+      layout.shadow,
+    ) {
+      value =
+        if (layout.shadow == PosterShadow.None) null
+        else withContext(Dispatchers.Default) { PosterShadow.load(art.accent, wide, layout.shadow) }
     }
   val baseShadow by
-    produceState<PosterShadow.Mask?>(null, style.mode, style.mat) {
+    produceState<PosterShadow.Mask?>(null, style.mode, style.mat, layout.shadow) {
       value =
-        if (style.mode == 2 && style.mat != 2)
-          withContext(Dispatchers.Default) { PosterShadow.load(android.graphics.Color.BLACK, wide) }
+        if (style.mode == 2 && style.mat != 2 && layout.shadow != PosterShadow.None)
+          withContext(Dispatchers.Default) {
+            PosterShadow.load(android.graphics.Color.BLACK, wide, layout.shadow)
+          }
         else null
     }
   val interaction = remember {
@@ -277,34 +286,6 @@ internal fun PosterCard(
   }
   Box(
     modifier
-      .graphicsLayer {
-        val scale = 1f + (CardMotion.scale(motion) - 1f) * progress
-        scaleX = scale
-        scaleY = scale
-        translationY = CardMotion.lift(motion).dp.toPx() * progress
-        transformOrigin = TransformOrigin(pivot, 1f)
-      }
-      .drawBehind {
-        if (layout.glow == 0) return@drawBehind
-        fun glow(mask: PosterShadow.Mask?, alpha: Float) {
-          if (mask == null || alpha <= .001f) return
-          val inset = (mask.inset * size.width / HomeLayout.PosterWidth).toInt()
-          drawImage(
-            mask.image,
-            dstOffset = IntOffset(-inset, -inset),
-            dstSize = IntSize(size.width.toInt() + inset * 2, size.height.toInt() + inset * 2),
-            alpha = alpha * layout.glow / 100f,
-          )
-        }
-        val baseOpacity = if (style.mode == 2) style.matOpacity / 100f else 0f
-        glow(baseShadow, baseOpacity * (1f - progress))
-        glow(
-          shadow,
-          if (style.mode == 2 && style.mat == 2) baseOpacity + (1f - baseOpacity) * progress
-          else progress,
-        )
-      }
-      .background(MaterialTheme.colorScheme.surfaceContainer, shape)
       .then(
         if (preview) Modifier
         else
@@ -318,17 +299,81 @@ internal fun PosterCard(
               onClick = onClick,
             )
       )
-      .semantics { contentDescription = art.program.title }
+      .clearAndSetSemantics {
+        contentDescription = description
+        role = Role.Button
+        this.focused = focused
+        onClick {
+          onClick()
+          true
+        }
+      }
   ) {
-    if (image != null && !image.isRecycled)
-      Image(
-        remember(image) { image.asImageBitmap() },
-        null,
-        Modifier.fillMaxSize(),
-        contentScale = ContentScale.Crop,
+    Box(
+      Modifier.fillMaxSize().graphicsLayer {
+        val scale = 1f + (CardMotion.scale(motion) - 1f) * progress
+        scaleX = scale
+        scaleY = scale
+        translationY = CardMotion.lift(motion).dp.toPx() * progress
+        transformOrigin = TransformOrigin(.5f, 1f)
+      }
+    ) {
+      val baseOpacity = if (style.mode == 2) style.matOpacity / 100f else 0f
+      PosterGlow(
+        baseShadow,
+        layout.glow,
+        { baseOpacity * (1f - progress) },
+        Modifier.matchParentSize(),
       )
-    if (art.clean) PosterBadgesContent(art.program.image, Modifier.fillMaxSize())
+      PosterGlow(
+        shadow,
+        layout.glow,
+        {
+          if (style.mode == 2 && style.mat == 2) baseOpacity + (1f - baseOpacity) * progress
+          else progress
+        },
+        Modifier.matchParentSize(),
+      )
+      Box(
+        Modifier.matchParentSize().background(MaterialTheme.colorScheme.surfaceContainer, shape)
+      ) {
+        if (image != null && !image.isRecycled)
+          Image(
+            remember(image) { image.asImageBitmap() },
+            null,
+            Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+          )
+        if (art.clean) PosterBadgesContent(art.program.image, Modifier.fillMaxSize())
+      }
+    }
   }
+}
+
+/** Fade a cached texture through layer properties without recording the poster again. */
+@Composable
+private fun PosterGlow(
+  mask: PosterShadow.Mask?,
+  strength: Int,
+  opacity: () -> Float,
+  modifier: Modifier,
+) {
+  if (mask == null || strength == 0) return
+  Spacer(
+    modifier
+      .graphicsLayer {
+        alpha = opacity() * strength / 100f
+        compositingStrategy = CompositingStrategy.ModulateAlpha
+      }
+      .drawBehind {
+        val inset = (mask.inset * size.width / HomeLayout.PosterWidth).toInt()
+        drawImage(
+          mask.image,
+          dstOffset = IntOffset(-inset, -inset),
+          dstSize = IntSize(size.width.toInt() + inset * 2, size.height.toInt() + inset * 2),
+        )
+      }
+  )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -348,15 +393,22 @@ internal fun HomeContent(
   val layout = remember(context, appearance) { HomeLayout(context) }
   val style = remember(context, appearance) { BackdropStyle(context) }
   var selected by remember { mutableIntStateOf(0) }
-  val row = rememberLazyListState()
+  val row = rememberScrollState()
+  val density = LocalDensity.current
   val rowFocus = rememberTvRowFocusSpec(layout.posterWidth + layout.gap, layout.motion)
-  val first = remember { FocusRequester() }
+  val posterFocus = remember(posters.map { it.program.intent }) { posters.map { FocusRequester() } }
+  val choosePoster =
+    remember(onPosterFocus) {
+      { index: Int ->
+        selected = index
+        onPosterFocus(index)
+      }
+    }
   val settings = remember { FocusRequester() }
   val vpnFocus = remember { FocusRequester() }
   val appsFocus = remember { FocusRequester() }
   var previewActive by remember { mutableStateOf(true) }
   val inputMode = LocalInputModeManager.current
-  val windowPixels = LocalWindowInfo.current.containerSize
   LaunchedEffect(focusRequest, posters.size) {
     if (preview && focusRequest > 0) {
       previewActive = false
@@ -367,28 +419,32 @@ internal fun HomeContent(
       inputMode.requestInputMode(InputMode.Keyboard)
       if (posters.isNotEmpty()) {
         selected = selected.coerceAtMost(posters.lastIndex)
-        row.scrollToItem(selected)
+        row.scrollTo(
+          with(density) { (selected * (layout.posterWidth + layout.gap)).dp.roundToPx() }
+        )
         withFrameNanos {}
-        first.requestFocus()
+        posterFocus[selected].requestFocus()
       } else settings.requestFocus()
     }
   }
-  Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-    if (wallpaper != null && !wallpaper.isRecycled)
+  Box(
+    modifier
+      .fillMaxSize()
+      .then(if (preview) Modifier.background(MaterialTheme.colorScheme.background) else Modifier)
+  ) {
+    if (!preview) {
+      val backgroundColor = MaterialTheme.colorScheme.background.toArgb()
+      AndroidView(
+        factory = { BackdropSurface(it) },
+        modifier = Modifier.fillMaxSize(),
+        update = { it.show(wallpaper, backgroundColor) },
+      )
+    } else if (wallpaper != null && !wallpaper.isRecycled)
       Image(
         remember(wallpaper) { wallpaper.asImageBitmap() },
         null,
         Modifier.fillMaxSize(),
         contentScale = ContentScale.Crop,
-        // A pixel-aligned wallpaper needs no resampling; previews and other sizes keep filtering.
-        filterQuality =
-          if (
-            !preview &&
-              wallpaper.width == windowPixels.width &&
-              wallpaper.height == windowPixels.height
-          )
-            FilterQuality.None
-          else FilterQuality.Low,
       )
     Row(
       Modifier.align(Alignment.TopEnd)
@@ -432,12 +488,10 @@ internal fun HomeContent(
           AirButton(
             click,
             Modifier.size(40.dp).then(extra).focusProperties {
-              down = if (posters.isEmpty()) FocusRequester.Cancel else first
+              down = posterFocus.getOrNull(selected) ?: FocusRequester.Cancel
               up = FocusRequester.Cancel
             },
             shape = CircleShape,
-            focusedColor = MaterialTheme.colorScheme.primaryContainer,
-            focusedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             onFocus = { focused = it },
             color = Color.Transparent,
             contentPadding = PaddingValues(9.dp),
@@ -481,39 +535,17 @@ internal fun HomeContent(
       Text(clock, Modifier.padding(start = 4.dp), fontSize = 25.sp)
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides rowFocus) {
-      LazyRow(
-        state = row,
-        modifier =
-          Modifier.fillMaxWidth()
-            .offset(y = layout.rowTop.dp)
-            .height((layout.posterHeight + 32).dp),
-        contentPadding = PaddingValues(horizontal = 32.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(layout.gap.dp),
-      ) {
-        itemsIndexed(posters, key = { _, item -> item.program.intent }) { index, art ->
-          PosterCard(
-            art,
-            style,
-            layout,
-            Modifier.size(layout.posterWidth.dp, layout.posterHeight.dp)
-              .then(if (index == selected) Modifier.focusRequester(first) else Modifier)
-              .focusProperties {
-                up = settings
-                down = FocusRequester.Cancel
-                if (index == 0) left = FocusRequester.Cancel
-                if (index == posters.lastIndex) right = FocusRequester.Cancel
-              },
-            preview = preview,
-            previewFocused = index == selected && previewActive,
-            pivot = if (index == 0) 0f else if (index == posters.lastIndex) 1f else .5f,
-            onFocus = {
-              selected = index
-              onPosterFocus(index)
-            },
-            onClick = { Actions.openUri(context, art.program.intent) },
-          )
-        }
-      }
+      PosterShelf(
+        posters,
+        layout,
+        style,
+        row,
+        posterFocus,
+        settings,
+        preview,
+        previewActive,
+        choosePoster,
+      )
     }
     val art = posters.getOrNull(selected)
     if (layout.showTitle && art != null) {
@@ -561,6 +593,52 @@ internal fun HomeContent(
               overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+  }
+}
+
+/** The bounded shelf is measured once; selecting a title does not rebuild card modifiers. */
+@Composable
+private fun PosterShelf(
+  posters: List<PosterArt>,
+  layout: HomeLayout,
+  style: BackdropStyle,
+  scroll: ScrollState,
+  focus: List<FocusRequester>,
+  settings: FocusRequester,
+  preview: Boolean,
+  previewActive: Boolean,
+  onFocus: (Int) -> Unit,
+) {
+  val context = LocalContext.current
+  Row(
+    Modifier.fillMaxWidth()
+      .offset(y = layout.rowTop.dp)
+      .height((layout.posterHeight + 32).dp)
+      .horizontalScroll(scroll)
+      .padding(horizontal = 32.dp, vertical = 16.dp),
+    horizontalArrangement = Arrangement.spacedBy(layout.gap.dp),
+  ) {
+    posters.forEachIndexed { index, art ->
+      key(art.program.intent) {
+        PosterCard(
+          art,
+          style,
+          layout,
+          Modifier.size(layout.posterWidth.dp, layout.posterHeight.dp)
+            .focusRequester(focus[index])
+            .focusProperties {
+              up = settings
+              down = FocusRequester.Cancel
+              if (index == 0) left = FocusRequester.Cancel
+              if (index == posters.lastIndex) right = FocusRequester.Cancel
+            },
+          preview = preview,
+          previewFocused = index == 0 && previewActive,
+          onFocus = { onFocus(index) },
+          onClick = { Actions.openUri(context, art.program.intent) },
+        )
+      }
     }
   }
 }

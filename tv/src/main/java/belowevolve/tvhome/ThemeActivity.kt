@@ -125,8 +125,18 @@ class ThemeActivity : QuietActivity() {
               ThemeSlider("Интервал карточек", "poster_gap", layout.gap, 8, 32, 4, ::set)
             }
             item {
-              ThemeSlider("Свечение карточек", "poster_glow", layout.glow, 0, 100, 5, ::set)
+              TvAction(
+                "Тень карточек",
+                Modifier.fillMaxWidth(),
+                trailingText = PosterShadow.NAMES[layout.shadow],
+              ) {
+                set("poster_shadow", (layout.shadow + 1) % PosterShadow.NAMES.size)
+              }
             }
+            if (layout.shadow != PosterShadow.None)
+              item {
+                ThemeSlider("Сила тени карточек", "poster_glow", layout.glow, 0, 100, 5, ::set)
+              }
             item {
               TvAction(
                 "Обработка фона",
