@@ -22,6 +22,7 @@ class InputRegressionRunner : Instrumentation() {
     private var tvRawLaunchUri: String? = null
     private var tvRawDelayMs: String? = null
     private var clipboardFixture = false
+    private var tvLifecycleFixture = false
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         tvHost = arguments?.getString("tvHost")
@@ -30,11 +31,18 @@ class InputRegressionRunner : Instrumentation() {
         tvRawLaunchUri = arguments?.getString("tvRawLaunchURI")
         tvRawDelayMs = arguments?.getString("tvRawDelayMs")
         clipboardFixture = arguments?.getString("clipboardFixture") == "true"
+        tvLifecycleFixture = arguments?.getString("tvLifecycleFixture") == "true"
         start()
     }
     override fun onStart() {
         val results = Bundle()
         try {
+            if (tvLifecycleFixture) {
+                checkTvConnectionLifecycle()
+                results.putString("stream", "TV lifecycle: background handshake, retained TLS session, immediate keys, held-key release, silent reconnect and cleanup: PASS\n")
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             if (clipboardFixture) {
                 require(tvHost == null && tvRawKey == null && tvRawLaunchUri == null) {
                     "Clipboard fixture cannot be combined with TV probes"

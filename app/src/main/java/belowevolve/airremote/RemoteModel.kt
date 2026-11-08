@@ -75,6 +75,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private var keyboardRevision = 0L
     @Volatile private var connectionGeneration = 0L
     private var networkPowerHeld = false
+    private var networkOkHeld = false
 
     private data class TvCommand(val generation: Long, val wake: Boolean, val action: TvClient.() -> Unit)
     private val commands = Channel<TvCommand>(Channel.UNLIMITED)
@@ -151,6 +152,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     private fun resetConnectionState() {
         connectionGeneration++
         networkPowerHeld = false
+        networkOkHeld = false
         voiceRequested = false
         stopVoice()
         keyboardVisible = false
@@ -173,16 +175,13 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        if (update.show && autoKeyboard && tvMode) {
+        if (foreground && update.show && autoKeyboard && tvMode) {
             keyboardVisible = true
         }
     }
 
     fun showKeyboard() {
-        if (!connected) {
-            showDeviceDialog()
-            return
-        }
+        if (!requireConnection()) return
         keyboardVisible = true
     }
 
@@ -226,7 +225,13 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun pause() {
         foreground = false
         if (pairing || pairingJob?.isActive == true) cancelPairing()
-        closeConnection()
+        // Keep a healthy TV session (and its heartbeat reader) across app switches.
+        // Only inputs and discovery belong to the visible activity.
+        holdOk(false)
+        holdPower(false)
+        voiceRequested = false
+        stopVoice()
+        hideKeyboard()
         stopDiscovery()
     }
 
@@ -450,13 +455,13 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                         withContext(Dispatchers.IO) {
                             client.listen(host, onKeyboard = { update ->
                                 viewModelScope.launch {
-                                    if (foreground && generation == connectionGeneration) receiveKeyboard(update)
+                                    if (generation == connectionGeneration) receiveKeyboard(update)
                                 }
                             }, onVoiceRequest = { requested ->
                                 viewModelScope.launch {
-                                    if (foreground && generation == connectionGeneration) {
-                                        voiceRequested = requested
-                                        if (!requested) stopVoice()
+                                    if (generation == connectionGeneration) {
+                                        voiceRequested = foreground && requested
+                                        if (!voiceRequested) stopVoice()
                                         else if (tvMode) {
                                             keyboardVisible = false
                                             // A new TV session replaces any previous recorder. Wait
@@ -472,7 +477,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                                 }
                             }) {
                                 viewModelScope.launch {
-                                    if (foreground && generation == connectionGeneration) {
+                                    if (generation == connectionGeneration) {
                                         connected = true
                                         connecting = false
                                         if (deviceDialog == TvDeviceDialogState.CONNECTING)
@@ -501,6 +506,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                         connectionNeedsAttention = true
                         resetConnectionState()
                         status = "ТВ недоступен"
+                        // A lost background session is retried when the app returns.
+                        if (!foreground) break
                         if (wakePending && android.os.SystemClock.elapsedRealtime() >= wakeDeadline) {
                             connecting = false
                             message = "ТВ не отвечает. Сетевой режим ожидания может быть отключён"
@@ -525,20 +532,29 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (connected) commands.trySend(TvCommand(connectionGeneration, wake, action))
     }
 
+    // Buttons must not turn automatic reconnection into a manual device picker.
+    internal fun requireConnection(): Boolean {
+        if (connected) return true
+        if (!connecting) showDeviceDialog()
+        return false
+    }
+
     fun holdOk(pressed: Boolean) {
-        if (!connected) {
-            if (pressed) showDeviceDialog()
+        if (!pressed) {
+            if (networkOkHeld) {
+                networkOkHeld = false
+                enqueue(wake = false) { sendKey(23, remote.Remotemessage.RemoteDirection.END_LONG) }
+            }
             return
         }
-        enqueue(wake = false) { sendKey(23, if (pressed) remote.Remotemessage.RemoteDirection.START_LONG else remote.Remotemessage.RemoteDirection.END_LONG) }
+        if (!requireConnection() || networkOkHeld) return
+        networkOkHeld = true
+        enqueue(wake = false) { sendKey(23, remote.Remotemessage.RemoteDirection.START_LONG) }
     }
 
     // User actions share the same disconnected-state behavior; the transport only sends packets.
     private fun sendCommand(wake: Boolean = true, action: TvClient.() -> Unit) {
-        if (!connected) {
-            showDeviceDialog()
-            return
-        }
+        if (!requireConnection()) return
         enqueue(wake, action)
     }
 
@@ -558,7 +574,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (!connected) {
             // IR supports a short power toggle only. Use it to wake an offline
             // TV; a connected TV must receive real network hold/release edges.
-            if (hasIr && powerSignal != null) powerIr() else showDeviceDialog()
+            if (hasIr && powerSignal != null) powerIr() else requireConnection()
             return
         }
         networkPowerHeld = true
@@ -568,7 +584,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun power() {
         if (hasIr && powerSignal != null) { powerIr(); return }
         if (connected) { key(26); return }
-        showDeviceDialog()
+        requireConnection()
     }
 
     fun powerIr() {
@@ -590,10 +606,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
             message = "Сначала останови микрофон для ПК"
             return
         }
-        if (!connected) {
-            showDeviceDialog()
-            return
-        }
+        if (!requireConnection()) return
         if (!voiceRequested) {
             key(84) // SEARCH opens TV voice search; its request starts capture below.
             return
@@ -646,6 +659,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         pause()
+        closeConnection()
         commands.close()
         if (initialized) client.cancelPairing()
     }

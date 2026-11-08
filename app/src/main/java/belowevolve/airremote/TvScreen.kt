@@ -78,7 +78,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
     ) { paddingValues ->
         Box(
             Modifier.fillMaxSize()
-                .clickable(enabled = !model.connected, onClick = model::showDeviceDialog),
+                .clickable(enabled = !model.connected && !model.connecting, onClick = model::showDeviceDialog),
             contentAlignment = Alignment.TopCenter,
         ) {
             Column(
@@ -240,7 +240,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                             else if (model.voiceRequested) "Говорить" else "Голос",
                         modifier = Modifier.weight(1f),
                         active = model.recording || model.voiceRequested,
-                        onClick = { if (model.connected) voice() else model.showDeviceDialog() },
+                        onClick = { if (model.requireConnection()) voice() },
                     )
                 }
             }
