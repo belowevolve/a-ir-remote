@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "AirRemote"
 include(":app")
+include(":shared")

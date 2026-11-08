@@ -12,38 +12,40 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
+import belowevolve.shared.design.RemotePalette
+import belowevolve.shared.design.RemoteShapes as SharedShapes
 
 private val RemoteDarkColors = darkColorScheme(
-    primary = Color(0xFFB8F397),
-    onPrimary = Color(0xFF183800),
+    primary = Color(RemotePalette.Primary),
+    onPrimary = Color(RemotePalette.OnPrimary),
     primaryContainer = Color(0xFF315318),
     onPrimaryContainer = Color(0xFFD3FFB6),
     secondary = Color(0xFFC7D9B6),
     onSecondary = Color(0xFF2C3826),
-    background = Color(0xFF101411),
-    onBackground = Color(0xFFE1E9DA),
-    surface = Color(0xFF181D18),
-    onSurface = Color(0xFFE1E9DA),
+    background = Color(RemotePalette.Background),
+    onBackground = Color(RemotePalette.Text),
+    surface = Color(RemotePalette.Surface),
+    onSurface = Color(RemotePalette.Text),
     surfaceVariant = Color(0xFF41493C),
-    onSurfaceVariant = Color(0xFFC1C9B7),
+    onSurfaceVariant = Color(RemotePalette.Muted),
     outline = Color(0xFF8B9383),
 )
 
 object RemoteColors {
-    val PowerContainer = Color(0xFF55252A)
-    val Power = Color(0xFFFFB3B3)
-    val Red = Color(0xFFE86A70)
-    val Green = Color(0xFF63B978)
-    val Yellow = Color(0xFFF0C85A)
-    val Blue = Color(0xFF62A9E8)
+    val PowerContainer = Color(RemotePalette.PowerContainer)
+    val Power = Color(RemotePalette.Power)
+    val Red = Color(RemotePalette.Red)
+    val Green = Color(RemotePalette.Green)
+    val Yellow = Color(RemotePalette.Yellow)
+    val Blue = Color(RemotePalette.Blue)
 }
 
 private val RemoteShapes = Shapes(
-    extraSmall = RoundedCornerShape(10.dp),
-    small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(32.dp),
+    extraSmall = RoundedCornerShape(SharedShapes.ExtraSmall.dp),
+    small = RoundedCornerShape(SharedShapes.Small.dp),
+    medium = RoundedCornerShape(SharedShapes.Medium.dp),
+    large = RoundedCornerShape(SharedShapes.Large.dp),
+    extraLarge = RoundedCornerShape(SharedShapes.ExtraLarge.dp),
 )
 
 private val RemoteTypography = Typography().run {

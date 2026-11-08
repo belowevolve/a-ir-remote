@@ -3,12 +3,13 @@ package belowevolve.airremote
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import belowevolve.shared.design.RemoteSpacing
 
 /** App spacing and component geometry, complementing MaterialTheme's colors and typography. */
 internal object RemoteLayout {
-    val ScreenPadding = 16.dp
-    val SmallGap = 8.dp
-    val Gap = 12.dp
+    val ScreenPadding = RemoteSpacing.Large.dp
+    val SmallGap = RemoteSpacing.Small.dp
+    val Gap = RemoteSpacing.Medium.dp
     val HeaderSize = 48.dp
     val HeaderActionSize = 48.dp
     val MicrophoneIconSize = 40.dp
@@ -20,7 +21,7 @@ internal object RemoteLayout {
     val ActionIconSize = 28.dp
     val InlineIconSize = 22.dp
     val ActionShape = RoundedCornerShape(22.dp)
-    val DialogInset = 24.dp
+    val DialogInset = RemoteSpacing.ExtraLarge.dp
     val DialogMaxWidth = 440.dp
     val DialogShape = RoundedCornerShape(24.dp)
 }
