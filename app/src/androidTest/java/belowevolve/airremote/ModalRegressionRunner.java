@@ -49,7 +49,8 @@ public final class ModalRegressionRunner extends Instrumentation {
             if (!"true".equals(args.getString("restoreOnly"))) {
                 backup();
                 getTargetContext().getSharedPreferences("pc_remote", 0).edit().putBoolean("auto_keyboard", false).commit();
-                if ("true".equals(args.getString("microphoneSettings"))) runMicrophoneSettings();
+                if ("tv".equals(args.getString("screenPreview"))) runDisconnectedTvPreview(result);
+                else if ("true".equals(args.getString("microphoneSettings"))) runMicrophoneSettings();
                 else if ("true".equals(args.getString("bluetoothProgress"))) runBluetoothProgress();
                 else if ("true".equals(args.getString("tvPairingFixture"))) runTvPairing();
                 else if ("true".equals(args.getString("unifiedConnection"))) runUnifiedConnection();
@@ -149,6 +150,16 @@ public final class ModalRegressionRunner extends Instrumentation {
         automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         await("ПК");
     }
+    private void runDisconnectedTvPreview(Bundle result) throws Exception {
+        phase = "disconnected_tv_preview";
+        require(getTargetContext().getSharedPreferences("remote", 0).edit()
+                .remove("host").remove("name").putBoolean("auto_connect", false)
+                .putBoolean("auto_keyboard", false).commit(), "tv_preview_setup_failed");
+        launch();
+        new ScreenPreviewCapture(this).capture("tv", result);
+        events.add("disconnected_tv_preview: PASS");
+    }
+
     private void runChecks() throws Exception {
         phase = "launch"; launch();
         phase = "pc_settings"; click(await("ПК")); click(await("Настройки ПК"));

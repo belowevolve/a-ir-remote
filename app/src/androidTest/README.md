@@ -14,6 +14,7 @@ adb -s PHONE shell am instrument -w -r -e modalFixture true \
 - `tvPairingFixture=true` — PIN-сопряжение с тестовым TLS-сервером из `fixtures/`; адрес и DNS-SD-имя задаются `tvFixtureHost` и `tvFixtureName`.
 - `bluetoothProgress=true` — лоадер на существующей Bluetooth-паре, выбранной через `bluetoothName`.
 - `microphoneSettings=true` — переключатели волны и анимации иконки.
+- `screenPreview=tv` — снимок с заголовком «Подключить ТВ», без имени сохранённого телевизора. Настройки и сертификаты сопряжения сохраняются.
 
 Настройки сохраняются перед прогоном и восстанавливаются в конце. После прерванного запуска используйте `restoreOnly=true` с тем же runner.
 
