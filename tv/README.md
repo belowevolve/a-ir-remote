@@ -19,6 +19,12 @@
 APK: `tv/build/outputs/apk/release/tv-release.apk`.
 Release использует стандартный Android debug-ключ. Для обновления установленного лаунчера и интеграции палитры film.mov нужна прежняя подпись.
 
+Установка по ADB вместе с профилем запуска и прокрутки:
+
+```sh
+./gradlew :tv:installRelease
+```
+
 Проверки на устройстве находятся в `src/androidTest/`; они запускаются отдельно через `LauncherRegressionRunner`.
 
 [Основной README](../README.md).
