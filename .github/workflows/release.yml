@@ -109,26 +109,12 @@ jobs:
       - run: cargo fmt --check
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D clippy::all
-      - run: cargo build --locked --release
-      - name: Prepare VB-CABLE bundle
-        run: |
-          New-Item -ItemType Directory -Force target/bundle | Out-Null
-          $archive = 'target/bundle/VBCABLE_Driver_Pack45.zip'
-          Invoke-WebRequest https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip -OutFile $archive
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb') {
-            throw 'VB-CABLE archive checksum mismatch'
-          }
-          Expand-Archive $archive -DestinationPath target/bundle/vbcable
-      - run: python scripts/collect-notices.py --target x86_64-pc-windows-msvc
       - name: Build installer
+        run: python scripts/build-installer.py --target x86_64-pc-windows-msvc
+      - name: Stage installer
         env:
           VERSION: ${{ needs.version.outputs.companion }}
         run: |
-          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-          if (!(Test-Path $nsis)) { throw 'NSIS is missing from the Windows runner' }
-          New-Item -ItemType Directory -Force ../artifacts | Out-Null
-          & $nsis /V2 "/DVERSION=$env:VERSION" '/DCOMPANION_BINARY=..\target\release\air-remote-companion.exe' installer/setup.nsi
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force ../dist | Out-Null
           Copy-Item "../artifacts/Air-Companion-Setup-$env:VERSION.exe" ../dist/Air-Companion-Setup.exe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

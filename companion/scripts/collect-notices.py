@@ -19,5 +19,7 @@ for package in sorted(metadata['packages'],key=lambda p:p['name']):
             elif path.is_dir():files.update(p for p in path.rglob('*') if p.is_file())
     if package.get('license_file'):files.add(folder/package['license_file'])
     parts.append(f"\n{'='*72}\n{package['name']} {package['version']}\n{package.get('repository') or ''}\nLicense: {package.get('license') or ''}\n")
-    for path in sorted(files):parts.append(f'\n--- {path.relative_to(folder)} ---\n'+path.read_text(errors='replace'))
-(root/'target/bundle/THIRD-PARTY-NOTICES.txt').write_text('\n'.join(parts))
+    for path in sorted(files):parts.append(f'\n--- {path.relative_to(folder)} ---\n'+path.read_text(encoding='utf-8',errors='replace'))
+output=root/'target/bundle/THIRD-PARTY-NOTICES.txt'
+output.parent.mkdir(parents=True,exist_ok=True)
+output.write_text('\n'.join(parts),encoding='utf-8')

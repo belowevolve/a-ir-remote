@@ -14,10 +14,12 @@
 cargo test --locked --manifest-path companion/Cargo.toml
 cargo fmt --check --manifest-path companion/Cargo.toml
 cargo clippy --locked --manifest-path companion/Cargo.toml --all-targets -- -D clippy::all
-bash companion/scripts/build-windows.sh
+python3 companion/scripts/build-installer.py
 ```
 
-Для установщика нужны Rust target `x86_64-pc-windows-gnu`, MinGW и NSIS. EXE появляется в `companion/target/x86_64-pc-windows-gnu/release/`, установщик — в `artifacts/`.
+Упаковка локально и в GitHub Actions использует один скрипт. Нужны Python 3 и NSIS; на Windows — Rust MSVC, на macOS/Linux — target `x86_64-pc-windows-gnu` и MinGW. EXE появляется в `companion/target/<target>/release/`, установщик — в `artifacts/`.
 
-Звуковые диагностические программы находятся в `examples/`.
+`scripts/collect-notices.py` собирает лицензии зависимостей для установщика, `scripts/make-icon.py` пересоздаёт Windows-иконку.
+
+Диагностика звука собирается отдельно из `examples/`.
 [Основной README](../README.md).

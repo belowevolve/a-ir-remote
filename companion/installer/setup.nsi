@@ -4,10 +4,10 @@ Unicode true
 !include x64.nsh
 !include WinVer.nsh
 !ifndef VERSION
-  !error "Build with scripts/build-windows.sh"
+  !error "Build with scripts/build-installer.py"
 !endif
 !ifndef COMPANION_BINARY
-  !define COMPANION_BINARY "..\target\x86_64-pc-windows-gnu\release\air-remote-companion.exe"
+  !error "Build with scripts/build-installer.py"
 !endif
 Name "Air Companion"
 OutFile "..\..\artifacts\Air-Companion-Setup-${VERSION}.exe"
