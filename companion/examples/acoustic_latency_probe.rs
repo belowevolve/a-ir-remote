@@ -1,9 +1,8 @@
 //! In-memory acoustic round-trip diagnostic. Start the phone's microphone stream first.
 //! Emits four quiet chirps at the current physical default output; never changes volume.
 //! Measures output-loopback QPC -> CABLE Output QPC, including the acoustic/phone path.
-//! Driver timestamps are not an absolute latency calibration: VB-CABLE testing also
-//! produced negative correlated offsets. Positive matches alone do not establish
-//! write-to-capture availability latency; see docs/microphone.md for measurement limitations.
+//! Driver timestamps do not establish write-to-capture availability latency.
+//! Correlated offsets must not be reported as calibrated end-to-end latency.
 //! --cable-only measures CABLE Input loopback -> CABLE Output, excluding phone/network.
 
 #[cfg(not(windows))]

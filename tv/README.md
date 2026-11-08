@@ -6,6 +6,8 @@
 
 Интерфейс написан на Kotlin и Jetpack Compose; системный HDMI использует `TvView`. Общие компоненты находятся в [`:shared`](../shared/README.md), адаптеры film.mov — в [`integrations/film`](integrations/film/README.md).
 
+Автор и лицензия встроенных обоев указаны в [CREDITS](src/main/assets/CREDITS.md).
+
 ## Сборка
 
 Из корня репозитория, с JDK 25 и Android SDK 37:
