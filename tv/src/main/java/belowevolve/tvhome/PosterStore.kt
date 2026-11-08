@@ -7,7 +7,6 @@ import java.io.*
 import java.net.*
 import java.nio.charset.StandardCharsets
 import java.util.*
-import kotlin.math.roundToInt
 
 /* Bounded original-artwork cache and focused-card-sized decoding. */
 class PosterStore(context: Context) {
@@ -97,8 +96,9 @@ class PosterStore(context: Context) {
     bounds.inJustDecodeBounds = true
     BitmapFactory.decodeFile(file!!.getPath(), bounds)
     val options: BitmapFactory.Options = BitmapFactory.Options()
-    val targetWidth = d(HomeLayout.PosterWidth * CardMotion.MaxScale)
-    val targetHeight = d(HomeLayout.PosterHeight * CardMotion.MaxScale)
+    // Decode once for every size preset, so editing size/spacing does not reload all artwork.
+    val targetWidth = d(HomeLayout.MaxPosterWidth * CardMotion.MaxScale)
+    val targetHeight = d(HomeLayout.MaxPosterHeight * CardMotion.MaxScale)
     var sample: Int = 1
     // Decode enough pixels for the focused card, without uploading oversized posters.
     while (
@@ -107,17 +107,38 @@ class PosterStore(context: Context) {
     ) sample *= 2
     options.inSampleSize = sample
     val decoded = BitmapFactory.decodeFile(file.getPath(), options) ?: return null
-    val scale =
-      maxOf(targetWidth.toFloat() / decoded.width, targetHeight.toFloat() / decoded.height)
-    if (scale >= 1f) return decoded
-    val compact =
-      Bitmap.createScaledBitmap(
-        decoded,
-        (decoded.width * scale).roundToInt().coerceAtLeast(1),
-        (decoded.height * scale).roundToInt().coerceAtLeast(1),
-        true,
-      )
-    if (compact !== decoded) decoded.recycle()
+    // Crop and round once here instead of applying a rounded GPU clip on every animated frame.
+    val compact = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+    try {
+      val scale =
+        maxOf(targetWidth.toFloat() / decoded.width, targetHeight.toFloat() / decoded.height)
+      val matrix =
+        Matrix().apply {
+          setScale(scale, scale)
+          postTranslate(
+            (targetWidth - decoded.width * scale) / 2,
+            (targetHeight - decoded.height * scale) / 2,
+          )
+        }
+      val paint =
+        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+          shader =
+            BitmapShader(decoded, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+              setLocalMatrix(matrix)
+            }
+        }
+      val radius = 12f * targetWidth / HomeLayout.PosterWidth
+      Canvas(compact)
+        .drawRoundRect(
+          RectF(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat()),
+          radius,
+          radius,
+          paint,
+        )
+    } finally {
+      decoded.recycle()
+    }
+    compact.prepareToDraw()
     return compact
   }
 

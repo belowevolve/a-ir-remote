@@ -20,7 +20,8 @@ class BackdropStyle(c: Context) {
   val feather: Int
 
   init {
-    bandCenter = HomeLayout(c).posterTop + HomeLayout.PosterHeight / 2
+    val layout = HomeLayout(c)
+    bandCenter = layout.posterTop + layout.posterHeight / 2
     val p: SharedPreferences = c.getSharedPreferences("appearance", 0)
     mode = get(p, "mode", 3, 0, 3)
     dim = get(p, "dim", 55, 0, 90)

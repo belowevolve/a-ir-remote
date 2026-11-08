@@ -147,8 +147,7 @@ class HomeActivity : QuietActivity() {
         scope.launch {
           val loaded =
             withContext(dispatcher) {
-              val art = artwork.loadCard(item.program.image)
-              PosterArt(item.program, art.bitmap, art.separateBadges, Ui.posterAccent(art.bitmap))
+              preparePosterArt(item.program, artwork)
             }
           if (signature == next)
             posters = posters.map {

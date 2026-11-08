@@ -5,12 +5,17 @@ import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import belowevolve.shared.compose.AirButton
@@ -25,6 +30,16 @@ class ThemeActivity : QuietActivity() {
   @Composable
   private fun ThemeScreen() {
     var revision by remember { mutableIntStateOf(0) }
+    var motionPreview by remember { mutableIntStateOf(0) }
+    val controls = rememberLazyListState()
+    val first = remember { FocusRequester() }
+    val inputMode = LocalInputModeManager.current
+    LaunchedEffect(Unit) {
+      inputMode.requestInputMode(InputMode.Keyboard)
+      controls.scrollToItem(0)
+      withFrameNanos {}
+      first.requestFocus()
+    }
     fun set(key: String, value: Int) {
       getSharedPreferences("appearance", 0).edit().putInt(key, value).apply()
       revision++
@@ -32,28 +47,35 @@ class ThemeActivity : QuietActivity() {
     val layout = remember(revision) { HomeLayout(this) }
     val style = remember(revision) { BackdropStyle(this) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-      Column(Modifier.fillMaxSize().padding(32.dp, 24.dp)) {
-        TvHeader("Тема", { finish() })
+      Box(Modifier.fillMaxSize()) {
         Row(
-          Modifier.weight(1f),
+          Modifier.fillMaxSize().padding(horizontal = 32.dp),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(28.dp),
         ) {
-          HomePreview(Modifier.weight(1f).aspectRatio(16 / 9f), revision = revision)
+          Box(
+            Modifier.weight(1f).fillMaxHeight().padding(top = 72.dp, bottom = 24.dp),
+            contentAlignment = Alignment.Center,
+          ) {
+            HomePreview(
+              Modifier.fillMaxWidth().aspectRatio(16 / 9f),
+              revision = revision,
+              focusRequest = motionPreview,
+            )
+          }
           LazyColumn(
             Modifier.width(340.dp).fillMaxHeight(),
+            state = controls,
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 24.dp),
+            contentPadding = PaddingValues(top = 72.dp, bottom = 24.dp),
           ) {
             item {
-              FocusFirst {
-                TvAction(
-                  "Компоновка",
-                  it.fillMaxWidth(),
-                  trailingText = HomeLayout.NAMES[layout.mode],
-                ) {
-                  set("layout", 1 - layout.mode)
-                }
+              TvAction(
+                "Компоновка",
+                Modifier.focusRequester(first).fillMaxWidth(),
+                trailingText = HomeLayout.NAMES[layout.mode],
+              ) {
+                set("layout", 1 - layout.mode)
               }
             }
             if (layout.mode == 1)
@@ -86,8 +108,24 @@ class ThemeActivity : QuietActivity() {
                 Modifier.fillMaxWidth(),
                 trailingText = HomeLayout.MOTIONS[layout.motion],
               ) {
-                set("card_motion", (layout.motion + 1) % HomeLayout.MOTIONS.size)
+                set("card_motion_v2", (layout.motion + 1) % HomeLayout.MOTIONS.size)
+                motionPreview++
               }
+            }
+            item {
+              TvAction(
+                "Размер карточек",
+                Modifier.fillMaxWidth(),
+                trailingText = HomeLayout.SIZES[layout.size],
+              ) {
+                set("poster_size", (layout.size + 1) % HomeLayout.SIZES.size)
+              }
+            }
+            item {
+              ThemeSlider("Интервал карточек", "poster_gap", layout.gap, 8, 32, 4, ::set)
+            }
+            item {
+              ThemeSlider("Свечение карточек", "poster_glow", layout.glow, 0, 100, 5, ::set)
             }
             item {
               TvAction(
@@ -215,6 +253,11 @@ class ThemeActivity : QuietActivity() {
             }
           }
         }
+        TvHeader(
+          "Тема",
+          { finish() },
+          Modifier.align(Alignment.TopStart).padding(start = 32.dp, top = 24.dp),
+        )
       }
     }
   }

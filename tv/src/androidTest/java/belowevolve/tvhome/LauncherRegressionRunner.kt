@@ -356,7 +356,14 @@ class LauncherRegressionRunner : Instrumentation() {
   private fun checkColor(image: Bitmap?, color: Int) {
     check(image != null, "Poster did not load")
     try {
-      check(image!!.getPixel(0, 0) == color, "Wrong poster returned from cache")
+      check(
+        image!!.getPixel(image.width / 2, image.height / 2) == color,
+        "Wrong poster returned from cache",
+      )
+      check(
+        Color.alpha(image.getPixel(0, 0)) == 0,
+        "Poster corners must be prepared before rendering",
+      )
     } finally {
       image!!.recycle()
     }

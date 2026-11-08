@@ -3,6 +3,7 @@ package belowevolve.tvhome
 import android.graphics.*
 import android.util.LruCache
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -33,10 +34,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun WallpaperPicker(onBack: () -> Unit, onChosen: () -> Unit) {
   val context = LocalContext.current
@@ -45,7 +47,7 @@ internal fun WallpaperPicker(onBack: () -> Unit, onChosen: () -> Unit) {
   val density = LocalDensity.current
   val thumbnails =
     remember(density) {
-      WallpaperThumbnails(with(density) { 136.dp.roundToPx() }, with(density) { 76.dp.roundToPx() })
+      WallpaperThumbnails(with(density) { 128.dp.roundToPx() }, with(density) { 72.dp.roundToPx() })
     }
   var photos by remember { mutableStateOf(emptyList<WallpaperStore.Photo>()) }
   var focusedIndex by remember { mutableIntStateOf(0) }
@@ -53,6 +55,7 @@ internal fun WallpaperPicker(onBack: () -> Unit, onChosen: () -> Unit) {
   var initialFocusPath by remember { mutableStateOf<String?>(null) }
   var previewPhoto by remember { mutableStateOf<File?>(null) }
   val photoRow = rememberLazyListState()
+  val rowFocus = rememberTvRowFocusSpec()
   val firstPhoto = remember { FocusRequester() }
   val inputMode = LocalInputModeManager.current
   var refreshing by remember { mutableStateOf(false) }
@@ -99,11 +102,15 @@ internal fun WallpaperPicker(onBack: () -> Unit, onChosen: () -> Unit) {
   }
   LaunchedEffect(photos) {
     snapshotFlow { focusedIndex to photoRow.isScrollInProgress }
-      .filter { !it.second }
-      .collect { (index, _) -> previewPhoto = photos.getOrNull(index)?.file }
+      .collectLatest { (index, scrolling) ->
+        if (!scrolling) {
+          // Keep scrolling responsive; update the large preview as soon as the row settles.
+          previewPhoto = photos.getOrNull(index)?.file
+        }
+      }
   }
   Column(
-    Modifier.fillMaxSize().padding(vertical = 24.dp),
+    Modifier.fillMaxSize().padding(top = 32.dp, bottom = 16.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Row(
@@ -114,9 +121,14 @@ internal fun WallpaperPicker(onBack: () -> Unit, onChosen: () -> Unit) {
       TvHeader("Фоны", onBack, Modifier.weight(1f))
       TvAction(
         "Другая подборка",
-        Modifier.width(240.dp),
+        fillLabel = false,
         leading = {
-          if (refreshing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+          if (refreshing)
+            CircularProgressIndicator(
+              Modifier.size(24.dp),
+              color = LocalContentColor.current,
+              strokeWidth = 2.dp,
+            )
           else Icon(painterResource(R.drawable.ic_wallpaper), null, Modifier.size(24.dp))
         },
       ) {
@@ -127,54 +139,56 @@ internal fun WallpaperPicker(onBack: () -> Unit, onChosen: () -> Unit) {
       Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
       contentAlignment = Alignment.Center,
     ) {
-      val width = minOf(maxWidth, maxHeight * (16 / 9f), 640.dp)
-      HomePreview(
-        Modifier.width(width).aspectRatio(16 / 9f),
-        previewPhoto,
-        revision,
-      )
+      val width = minOf(maxWidth, (maxHeight - 20.dp) * (16 / 9f), 640.dp)
+      Column(Modifier.width(width), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        HomePreview(Modifier.fillMaxWidth().aspectRatio(16 / 9f), previewPhoto, revision)
+        Text(
+          message.ifEmpty {
+            photos.getOrNull(focusedIndex)?.caption?.removePrefix("Google Backdrop\n")
+              ?: if (refreshing) "Загрузка…" else "Нет фотографий"
+          },
+          Modifier.fillMaxWidth().height(16.dp),
+          fontSize = 13.sp,
+          lineHeight = 16.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
     }
-    Text(
-      message.ifEmpty {
-        photos.getOrNull(focusedIndex)?.caption?.removePrefix("Google Backdrop\n")
-          ?: if (refreshing) "Загрузка…" else "Нет фотографий"
-      },
-      Modifier.fillMaxWidth().padding(horizontal = 32.dp).height(24.dp),
-      fontSize = 13.sp,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-    )
-    LazyRow(
-      Modifier.fillMaxWidth().height(100.dp).focusGroup(),
-      state = photoRow,
-      contentPadding = PaddingValues(horizontal = 32.dp, vertical = 10.dp),
-      horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-      itemsIndexed(photos, key = { _, photo -> photo.file.path }) { index, photo ->
-        @Composable
-        fun card(modifier: Modifier) {
-          WallpaperThumbnail(
-            photo.file,
-            thumbnails,
-            chosenPath == photo.file.path,
-            modifier.focusProperties {
-              down = FocusRequester.Cancel
-              if (index == 0) left = FocusRequester.Cancel
-              if (index == photos.lastIndex) right = FocusRequester.Cancel
-            },
-            onFocus = {
-              focusedIndex = index
-            },
-          ) {
-            scope.launch {
-              if (withContext(Dispatchers.IO) { store.choose(photo.file) }) onChosen()
-              else refresh(false)
+    CompositionLocalProvider(LocalBringIntoViewSpec provides rowFocus) {
+      LazyRow(
+        Modifier.fillMaxWidth().height(80.dp).focusGroup(),
+        state = photoRow,
+        contentPadding = PaddingValues(horizontal = 32.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
+        itemsIndexed(photos, key = { _, photo -> photo.file.path }) { index, photo ->
+          @Composable
+          fun card(modifier: Modifier) {
+            WallpaperThumbnail(
+              photo.file,
+              thumbnails,
+              chosenPath == photo.file.path,
+              modifier.focusProperties {
+                down = FocusRequester.Cancel
+                if (index == 0) left = FocusRequester.Cancel
+                if (index == photos.lastIndex) right = FocusRequester.Cancel
+              },
+              onFocus = {
+                focusedIndex = index
+              },
+            ) {
+              scope.launch {
+                if (withContext(Dispatchers.IO) { store.choose(photo.file) }) onChosen()
+                else refresh(false)
+              }
             }
           }
+          card(
+            if (photo.file.path == initialFocusPath) Modifier.focusRequester(firstPhoto)
+            else Modifier
+          )
         }
-        card(
-          if (photo.file.path == initialFocusPath) Modifier.focusRequester(firstPhoto) else Modifier
-        )
       }
     }
   }
@@ -198,7 +212,7 @@ private fun WallpaperThumbnail(
   val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
   Box(
     modifier
-      .size(136.dp, 76.dp)
+      .size(128.dp, 72.dp)
       .border(
         if (focused) 3.dp else 1.dp,
         if (focused) MaterialTheme.colorScheme.primary
@@ -227,10 +241,10 @@ private fun WallpaperThumbnail(
         Surface(
           Modifier.align(Alignment.TopEnd).padding(5.dp).size(24.dp),
           shape = CircleShape,
-          color = MaterialTheme.colorScheme.primary,
+          color = MaterialTheme.colorScheme.primaryContainer,
         ) {
           Box(contentAlignment = Alignment.Center) {
-            Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp)
+            Text("✓", color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 16.sp)
           }
         }
     }

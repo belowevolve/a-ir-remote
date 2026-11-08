@@ -181,6 +181,7 @@ class WallpaperController(
         checkCancelled()
         BackdropStyle(context).apply(prepared, checkCancelled)
         checkCancelled()
+        prepared.prepareToDraw()
         return Prepared(prepared, theme, themeKey)
       } catch (error: Throwable) {
         prepared?.recycle()
