@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "air-remote-companion"
-version = "0.5.6"
+version = "0.5.15"
 dependencies = [
  "anyhow",
  "base64",
@@ -29,8 +29,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "unicode-segmentation",
  "wasapi",
  "windows 0.62.2",
+ "windows-core 0.62.2",
  "windows-sys 0.59.0",
  "winresource",
 ]
@@ -1355,6 +1357,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "untrusted"

@@ -1,14 +1,26 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod audio;
+mod clipboard;
 mod identity;
+#[cfg(windows)]
+mod initial_text;
+#[cfg(any(windows, test))]
+mod microphone_test;
+#[cfg(any(windows, test))]
+mod pairing_view;
 mod platform;
 mod server;
+#[cfg(windows)]
+mod text_focus;
+mod text_input;
 #[cfg(windows)]
 mod windows_audio;
 #[cfg(windows)]
 mod windows_icon;
 #[cfg(windows)]
 mod windows_startup;
+#[cfg(windows)]
+mod windows_text_input;
 #[cfg(windows)]
 mod windows_ui;
 fn run() -> anyhow::Result<()> {
@@ -35,7 +47,7 @@ fn run() -> anyhow::Result<()> {
     }
     #[cfg(not(windows))]
     {
-        eprintln!("Air Remote: audio receiver on {}:54346. Keyboard sync and pairing UI currently require Windows.",app.host);
+        eprintln!("Air Companion: audio receiver on {}:54346. Keyboard sync and pairing UI currently require Windows.",app.host);
         loop {
             std::thread::park();
         }

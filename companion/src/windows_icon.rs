@@ -105,8 +105,14 @@ pub fn update_shortcut(colors: (u32, u32, u32)) -> Result<()> {
     if !icon.exists() {
         std::fs::write(&icon, ico(colors))?;
     }
-    let link = std::path::PathBuf::from(std::env::var("APPDATA")?)
-        .join("Microsoft/Windows/Start Menu/Programs/Air Remote/Air Remote.lnk");
+    let programs = std::path::PathBuf::from(std::env::var("APPDATA")?)
+        .join("Microsoft/Windows/Start Menu/Programs");
+    let current = programs.join("Air Companion/Air Companion.lnk");
+    let link = if current.exists() {
+        current
+    } else {
+        programs.join("Air Remote/Air Remote.lnk")
+    };
     // Portable runs must not create Start menu entries.
     if !link.exists() {
         return Ok(());

@@ -1,4 +1,5 @@
-//! Diagnostic only: measures local receiver -> CABLE Output, without a phone or HDMI playback.
+//! Diagnostic: local receiver -> CABLE Output latency, or --capture-only to
+//! verify an existing phone stream at CABLE Output without recording audio.
 use anyhow::{bail, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
@@ -35,11 +36,19 @@ fn main() -> Result<()> {
     let started = Instant::now();
     let observed = Arc::new(Mutex::new(Vec::<f64>::new()));
     let captured = observed.clone();
+    let levels = Arc::new(Mutex::new((0u64, 0f64, 0f32)));
+    let captured_levels = levels.clone();
     let mut last = 0.0;
     let record = device.build_input_stream(
         &config,
         move |data: &[f32], _| {
             let peak = data.iter().fold(0f32, |p, v| p.max(v.abs()));
+            let energy = data.iter().map(|&v| f64::from(v).powi(2)).sum::<f64>();
+            let mut levels = captured_levels.lock().unwrap();
+            levels.0 += data.len() as u64;
+            levels.1 += energy;
+            levels.2 = levels.2.max(peak);
+            drop(levels);
             let now = started.elapsed().as_secs_f64() * 1000.;
             if peak > 0.06 {
                 if now - last > 500. {
@@ -52,6 +61,21 @@ fn main() -> Result<()> {
         None,
     )?;
     record.play()?;
+    if std::env::args().any(|a| a == "--capture-only") {
+        thread::sleep(Duration::from_secs(10));
+        record.pause()?;
+        let levels = levels.lock().unwrap();
+        println!(
+            "{}",
+            serde_json::json!({
+                "mode": "capture-only", "device": "CABLE Output", "seconds": 10,
+                "samples": levels.0, "peak": levels.2,
+                "rms": if levels.0 == 0 { 0.0 } else { (levels.1 / levels.0 as f64).sqrt() },
+                "signal_detected": levels.2 > 0.0001,
+            })
+        );
+        return Ok(());
+    }
     let socket = TcpStream::connect((host.as_str(), 54346))?;
     socket.set_nodelay(true)?;
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;

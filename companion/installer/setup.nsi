@@ -6,8 +6,8 @@ Unicode true
 !ifndef VERSION
   !error "Build with scripts/build-windows.sh"
 !endif
-Name "Air Remote"
-OutFile "..\..\artifacts\Air-Remote-Setup-${VERSION}.exe"
+Name "Air Companion"
+OutFile "..\..\artifacts\Air-Companion-Setup-${VERSION}.exe"
 InstallDir "$PROGRAMFILES64\Air Remote"
 InstallDirRegKey HKLM "Software\AirRemote" "InstallDir"
 RequestExecutionLevel admin
@@ -17,11 +17,11 @@ UninstallIcon "..\assets\air-remote.ico"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchCompanion
-!define MUI_FINISHPAGE_RUN_TEXT "Запустить Air Remote"
+!define MUI_FINISHPAGE_RUN_TEXT "Запустить Air Companion"
 !define MUI_FINISHPAGE_LINK "VB-CABLE · поддержать автора"
 !define MUI_FINISHPAGE_LINK_LOCATION "https://vb-audio.com/Cable/"
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "NOTICE.txt"
+!insertmacro MUI_PAGE_LICENSE "NOTICE"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -45,7 +45,7 @@ Function .onInit
   SetRegView 64
   SetShellVarContext all
 FunctionEnd
-Section "Air Remote: пульт, клавиатура и синхронизация" Core
+Section "Air Companion: раскладка и буфер обмена" Core
   SectionIn RO
   ; Shut down only our own companion, preserving pairing data.
   IfFileExists "$INSTDIR\air-remote-companion.exe" 0 +3
@@ -61,18 +61,26 @@ Section "Air Remote: пульт, клавиатура и синхронизац�
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AirRemote" '$\"$INSTDIR\air-remote-companion.exe$\" --background'
     Delete "$SMSTARTUP\Air Remote.lnk"
   SetOutPath "$INSTDIR"
+  ClearErrors
   File "..\target\x86_64-pc-windows-gnu\release\air-remote-companion.exe"
-  File "NOTICE.txt"
+  ${If} ${Errors}
+    MessageBox MB_OK|MB_ICONSTOP "Не удалось обновить Air Companion. Закройте приложение и повторите установку." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
+  File /oname=NOTICE.txt "NOTICE"
   File "..\target\bundle\THIRD-PARTY-NOTICES.txt"
   WriteRegStr HKLM "Software\AirRemote" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   Delete "$SMPROGRAMS\Air Remote\Air Remote.lnk"
   RMDir "$SMPROGRAMS\Air Remote"
   SetShellVarContext current
-  CreateDirectory "$SMPROGRAMS\Air Remote"
-  CreateShortcut "$SMPROGRAMS\Air Remote\Air Remote.lnk" "$INSTDIR\air-remote-companion.exe"
+  Delete "$SMPROGRAMS\Air Remote\Air Remote.lnk"
+  RMDir "$SMPROGRAMS\Air Remote"
+  CreateDirectory "$SMPROGRAMS\Air Companion"
+  CreateShortcut "$SMPROGRAMS\Air Companion\Air Companion.lnk" "$INSTDIR\air-remote-companion.exe"
   SetShellVarContext all
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayName" "Air Remote"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayName" "Air Companion"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "DisplayIcon" "$INSTDIR\air-remote-companion.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\AirRemote" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
@@ -83,7 +91,7 @@ Section "Air Remote: пульт, клавиатура и синхронизац�
   nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="Air Remote Companion" dir=in action=allow program="$INSTDIR\air-remote-companion.exe" protocol=TCP localport=54346 remoteip=LocalSubnet profile=any'
   Pop $0
   ${If} $0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Не удалось настроить брандмауэр. При запуске разрешите Air Remote доступ к локальной сети."
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Не удалось настроить брандмауэр. При запуске разрешите Air Companion доступ к локальной сети."
   ${EndIf}
 SectionEnd
 Section "Микрофон: VB-CABLE (donationware)" Mic
@@ -97,7 +105,7 @@ Section "Микрофон: VB-CABLE (donationware)" Mic
     ${If} $1 == 0
       SetRebootFlag true
     ${Else}
-      MessageBox MB_OK|MB_ICONINFORMATION "VB-CABLE пока недоступен. Если драйвер установлен, перезагрузите Windows. Повторить установку можно из Air Remote Setup. Пульт и клавиатура уже готовы."
+      MessageBox MB_OK|MB_ICONINFORMATION "VB-CABLE пока недоступен. Если драйвер установлен, перезагрузите Windows. Повторить установку можно из Air Companion Setup. Компаньон уже установлен."
     ${EndIf}
   ${Else}
     DetailPrint "VB-CABLE уже установлен. Существующие настройки сохранены."
@@ -119,9 +127,13 @@ Section "Uninstall"
   Delete "$SMSTARTUP\Air Remote.lnk"
   Delete "$SMPROGRAMS\Air Remote\Air Remote.lnk"
   RMDir "$SMPROGRAMS\Air Remote"
+  Delete "$SMPROGRAMS\Air Companion\Air Companion.lnk"
+  RMDir "$SMPROGRAMS\Air Companion"
   SetShellVarContext current
   Delete "$SMPROGRAMS\Air Remote\Air Remote.lnk"
   RMDir "$SMPROGRAMS\Air Remote"
+  Delete "$SMPROGRAMS\Air Companion\Air Companion.lnk"
+  RMDir "$SMPROGRAMS\Air Companion"
   SetShellVarContext all
   Delete "$INSTDIR\air-remote-companion.exe"
   Delete "$INSTDIR\NOTICE.txt"

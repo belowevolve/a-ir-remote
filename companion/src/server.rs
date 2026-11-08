@@ -1,9 +1,9 @@
-use crate::{audio, identity::Identity, platform};
+use crate::{audio, clipboard, identity::Identity, platform, text_input};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::{
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{Shutdown, TcpListener, TcpStream},
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
@@ -80,6 +80,51 @@ impl App {
 struct Hello {
     token: String,
     kind: String,
+    #[serde(default)]
+    watch_text_focus: bool,
+}
+struct TextConnection {
+    id: u64,
+    socket: TcpStream,
+    cancelled: Arc<AtomicBool>,
+}
+static TEXT_CONNECTION: Mutex<Option<TextConnection>> = Mutex::new(None);
+static TEXT_HANDSHAKE: Mutex<()> = Mutex::new(());
+static TEXT_ID: AtomicU64 = AtomicU64::new(1);
+struct TextRegistration(u64);
+impl Drop for TextRegistration {
+    fn drop(&mut self) {
+        let mut current = TEXT_CONNECTION.lock().unwrap();
+        if current.as_ref().is_some_and(|active| active.id == self.0) {
+            *current = None;
+        }
+    }
+}
+fn open_text(socket: &TcpStream) -> Result<(text_input::Session, TextRegistration), &'static str> {
+    // Only authenticated requests reach this function. A new explicit session can
+    // replace a half-open connection without replaying any old fragment.
+    let _handshake = TEXT_HANDSHAKE.lock().unwrap();
+    if let Some(previous) = TEXT_CONNECTION.lock().unwrap().take() {
+        previous.cancelled.store(true, Ordering::SeqCst);
+        let _ = previous.socket.shutdown(Shutdown::Both);
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let began = Instant::now();
+    let session = loop {
+        match text_input::Session::begin(cancelled.clone()) {
+            Err("input_busy") if began.elapsed() < Duration::from_millis(1500) => {
+                thread::sleep(Duration::from_millis(10))
+            }
+            result => break result?,
+        }
+    };
+    let id = TEXT_ID.fetch_add(1, Ordering::SeqCst);
+    *TEXT_CONNECTION.lock().unwrap() = Some(TextConnection {
+        id,
+        socket: socket.try_clone().map_err(|_| "connection_lost")?,
+        cancelled,
+    });
+    Ok((session, TextRegistration(id)))
 }
 pub fn read_line(reader: &mut impl Read) -> Result<Vec<u8>> {
     let mut data = Vec::new();
@@ -126,7 +171,22 @@ fn session(socket: TcpStream, app: &App) -> Result<()> {
     match hello.kind.as_str() {
         "control" => {
             stream.write_all(b"OK\n")?;
+            serde_json::to_writer(
+                &mut stream,
+                &serde_json::json!({"capabilities": capabilities()}),
+            )?;
+            stream.write_all(b"\n")?;
             stream.flush()?;
+            #[cfg(windows)]
+            let focus = if hello.watch_text_focus {
+                crate::text_focus::Monitor::start()
+            } else {
+                None
+            };
+            #[cfg(not(windows))]
+            let _ = hello.watch_text_focus;
+            #[cfg(windows)]
+            let mut last_focus = None;
             let mut previous = None;
             let mut heartbeat = Instant::now();
             app.controls.fetch_add(1, Ordering::SeqCst);
@@ -145,6 +205,20 @@ fn session(socket: TcpStream, app: &App) -> Result<()> {
             }
             let _control = Control(app);
             loop {
+                #[cfg(windows)]
+                if let Some(ref focus) = focus {
+                    if let Some(current) = focus.snapshot() {
+                        if last_focus != Some(current) {
+                            serde_json::to_writer(
+                                &mut stream,
+                                &serde_json::json!({"text_focus":current.0,"editable":current.1}),
+                            )?;
+                            stream.write_all(b"\n")?;
+                            stream.flush()?;
+                            last_focus = Some(current);
+                        }
+                    }
+                }
                 let state = platform::keyboard_state();
                 if state != previous {
                     if let Some(ref state) = state {
@@ -162,6 +236,34 @@ fn session(socket: TcpStream, app: &App) -> Result<()> {
                 }
                 thread::sleep(Duration::from_millis(150));
             }
+        }
+        "clipboard" => {
+            if clipboard::capabilities().is_empty() {
+                stream.write_all(b"ERROR Clipboard is not supported on this PC\n")?;
+                stream.flush()?;
+                return Ok(());
+            }
+            stream.write_all(b"OK\n")?;
+            stream.flush()?;
+            clipboard::receive(&mut stream)?;
+            Ok(())
+        }
+        "text_input_v4" => {
+            match open_text(&stream.sock) {
+                Ok((session, _registration)) => {
+                    // The phone closes this explicit session on leaving the editor.
+                    // A replacement authenticated session shuts down the old socket.
+                    stream.sock.set_read_timeout(None)?;
+                    stream.write_all(b"OK\n")?;
+                    stream.flush()?;
+                    text_input::receive(&mut stream, session)?;
+                }
+                Err(error) => {
+                    writeln!(stream, "ERROR {error}")?;
+                    stream.flush()?;
+                }
+            }
+            Ok(())
         }
         "audio" => {
             if app.audio_active.swap(true, Ordering::SeqCst) {
@@ -199,6 +301,13 @@ fn session(socket: TcpStream, app: &App) -> Result<()> {
         }
         _ => bail!("Unknown connection kind"),
     }
+}
+fn capabilities() -> Vec<&'static str> {
+    let mut values = clipboard::capabilities().to_vec();
+    if cfg!(windows) {
+        values.push("native_text_v4");
+    }
+    values
 }
 #[cfg(test)]
 mod tests {

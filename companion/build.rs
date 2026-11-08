@@ -5,8 +5,8 @@ fn main() {
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon("assets/air-remote.ico");
         resource.set_manifest_file("assets/app.manifest");
-        resource.set("ProductName", "Air Remote");
-        resource.set("FileDescription", "Air Remote Companion");
+        resource.set("ProductName", "Air Companion");
+        resource.set("FileDescription", "Air Companion");
         resource.compile().expect("Windows icon resource");
     }
 }

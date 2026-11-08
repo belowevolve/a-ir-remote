@@ -28,8 +28,12 @@ struct Packet {
     #[prost(uint32, tag = "4")]
     audio_format: u32,
 }
-fn decode(packet: &[u8]) -> Result<Vec<f32>> {
-    let p = Packet::decode(packet)?;
+fn decode(packet: &[u8], p: &mut Packet, samples: &mut Vec<f32>) -> Result<()> {
+    // Reuse both buffers across 10 ms frames. Clear fields before merging so a
+    // malformed or incomplete message cannot inherit the previous frame's format.
+    p.clear();
+    samples.clear();
+    p.merge(packet)?;
     if p.sample_rate != RATE as u32 || p.channel_count != 1 {
         bail!("Expected 48 kHz mono");
     }
@@ -38,24 +42,21 @@ fn decode(packet: &[u8]) -> Result<Vec<f32>> {
         4 => 4,
         _ => bail!("Unsupported PCM format"),
     };
-    if p.buffer.is_empty() || p.buffer.len() % width != 0 || p.buffer.len() / width > 2400 {
+    if p.buffer.is_empty() || !p.buffer.len().is_multiple_of(width) || p.buffer.len() / width > 2400
+    {
         bail!("Invalid audio frame");
     }
-    let samples: Vec<_> = p
-        .buffer
-        .chunks_exact(width)
-        .map(|b| {
-            if width == 4 {
-                f32::from_le_bytes(b.try_into().unwrap())
-            } else {
-                i16::from_le_bytes(b.try_into().unwrap()) as f32 / 32768.0
-            }
-        })
-        .collect();
+    samples.extend(p.buffer.chunks_exact(width).map(|b| {
+        if width == 4 {
+            f32::from_le_bytes(b.try_into().unwrap())
+        } else {
+            i16::from_le_bytes(b.try_into().unwrap()) as f32 / 32768.0
+        }
+    }));
     if samples.iter().any(|v| !v.is_finite()) {
         bail!("Non-finite audio sample");
     }
-    Ok(samples)
+    Ok(())
 }
 
 pub fn outputs() -> Result<Vec<String>> {
@@ -211,6 +212,8 @@ pub fn receive(
     #[cfg(not(windows))]
     playback.play()?;
     let mut packet = Vec::new();
+    let mut decoded = Packet::default();
+    let mut samples = Vec::new();
     loop {
         #[cfg(windows)]
         playback.check()?;
@@ -222,7 +225,8 @@ pub fn receive(
         }
         packet.resize(length, 0);
         connection.read_exact(&mut packet)?;
-        for sample in decode(&packet)? {
+        decode(&packet, &mut decoded, &mut samples)?;
+        for &sample in &samples {
             if producer.push(sample).is_err() {
                 dropped.fetch_add(1, Ordering::Relaxed);
             }
@@ -232,6 +236,11 @@ pub fn receive(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn decode_once(bytes: &[u8]) -> Result<Vec<f32>> {
+        let mut samples = Vec::new();
+        decode(bytes, &mut Packet::default(), &mut samples)?;
+        Ok(samples)
+    }
     fn packet(bytes: Vec<u8>, format: u32) -> Vec<u8> {
         Packet {
             buffer: bytes,
@@ -243,10 +252,29 @@ mod tests {
     }
     #[test]
     fn validates_audio_boundaries() {
-        assert!(decode(&packet(vec![0], 2)).is_err());
-        assert!(decode(&packet(f32::NAN.to_le_bytes().to_vec(), 4)).is_err());
-        assert!(decode(&packet(vec![0; 9604], 4)).is_err());
-        assert_eq!(decode(&packet(vec![0, 128], 2)).unwrap(), vec![-1.0]);
+        assert!(decode_once(&packet(vec![0], 2)).is_err());
+        assert!(decode_once(&packet(f32::NAN.to_le_bytes().to_vec(), 4)).is_err());
+        assert!(decode_once(&packet(vec![0; 9604], 4)).is_err());
+        assert_eq!(decode_once(&packet(vec![0, 128], 2)).unwrap(), vec![-1.0]);
+    }
+    #[test]
+    fn reused_decoder_replaces_samples_and_rejects_missing_fields() {
+        let mut decoded = Packet::default();
+        let mut samples = Vec::new();
+        decode(&packet(vec![0, 128, 0, 64], 2), &mut decoded, &mut samples).unwrap();
+        let capacity = samples.capacity();
+        decode(
+            &packet(0.25f32.to_le_bytes().to_vec(), 4),
+            &mut decoded,
+            &mut samples,
+        )
+        .unwrap();
+        assert_eq!(samples, vec![0.25]);
+        assert_eq!(samples.capacity(), capacity);
+        assert!(decode(&[10, 2, 0, 0], &mut decoded, &mut samples).is_err());
+        assert!(samples.is_empty());
+        decode(&packet(vec![0, 128], 2), &mut decoded, &mut samples).unwrap();
+        assert_eq!(samples, vec![-1.0]);
     }
     #[test]
     fn waits_for_jitter_cushion() {

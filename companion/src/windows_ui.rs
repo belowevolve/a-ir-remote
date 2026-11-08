@@ -10,7 +10,10 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::{Dwm::*, Gdi::*},
     System::{DataExchange::*, LibraryLoader::GetModuleHandleW, Memory::*, Registry::*},
-    UI::{Controls::*, HiDpi::*, Shell::*, WindowsAndMessaging::*},
+    UI::{
+        Controls::*, HiDpi::*, Input::KeyboardAndMouse::EnableWindow, Shell::*,
+        WindowsAndMessaging::*,
+    },
 };
 
 static APP: OnceLock<Arc<App>> = OnceLock::new();
@@ -24,6 +27,8 @@ const PAIR: i32 = 108;
 const STARTUP: i32 = 109;
 const SHOW: i32 = 110;
 const CONNECT_PHONE: i32 = 111;
+const TEST_MICROPHONE: i32 = 112;
+const RECORD_MICROPHONE: i32 = 113;
 const TRAY: u32 = WM_APP + 1;
 unsafe fn fit_dpi(dpi: u32, window: HWND) -> u32 {
     let mut info: MONITORINFO = std::mem::zeroed();
@@ -34,7 +39,7 @@ unsafe fn fit_dpi(dpi: u32, window: HWND) -> u32 {
     }
     let height = info.rcWork.bottom - info.rcWork.top;
     let width = info.rcWork.right - info.rcWork.left;
-    dpi.min((height * 96 / 680) as u32)
+    dpi.min((height * 96 / 780) as u32)
         .min((width * 96 / 600) as u32)
         .max(48)
 }
@@ -66,11 +71,11 @@ struct Visual {
     heading: HFONT,
     theme_icon: HICON,
     caption_icon: HICON,
-    show_pairing: bool,
-    connections: usize,
+    pairing: crate::pairing_view::PairingView,
     small: HFONT,
     qr: QrCode,
     status: String,
+    microphone_test: Option<crate::microphone_test::MicrophoneTest>,
 }
 impl Visual {
     unsafe fn new(dpi: u32, icon_dpi: u32) -> Self {
@@ -176,8 +181,7 @@ impl Visual {
                 icon_colors.2,
                 GetSystemMetricsForDpi(SM_CXSMICON, icon_dpi) as usize,
             ),
-            show_pairing: APP.get().unwrap().phone_connections() == 0,
-            connections: APP.get().unwrap().phone_connections(),
+            pairing: crate::pairing_view::PairingView::new(APP.get().unwrap().phone_connections()),
             small: font(13, 400),
             qr: QrCode::new(
                 APP.get()
@@ -187,17 +191,33 @@ impl Visual {
             )
             .unwrap(),
             status: String::new(),
+            microphone_test: None,
         }
     }
     fn px(&self, v: i32) -> i32 {
         v * self.dpi / 96
     }
     fn rect(&self, x: i32, y: i32, w: i32, h: i32) -> RECT {
+        let y = self.content_y(y);
         RECT {
             left: self.px(x),
             top: self.px(y),
             right: self.px(x + w),
             bottom: self.px(y + h),
+        }
+    }
+    fn connected_inset(&self) -> i32 {
+        if self.pairing.connected() && !self.pairing.expanded {
+            48
+        } else {
+            0
+        }
+    }
+    fn content_y(&self, y: i32) -> i32 {
+        if y >= 164 {
+            y - self.connected_inset()
+        } else {
+            y
         }
     }
     unsafe fn text(&self, dc: HDC, text: &str, area: RECT, font: HFONT, color: u32, flags: u32) {
@@ -322,7 +342,7 @@ pub fn error(message: &str) {
         MessageBoxW(
             null_mut(),
             wide(message).as_ptr(),
-            wide("Air Remote").as_ptr(),
+            wide("Air Companion").as_ptr(),
             MB_OK | MB_ICONERROR,
         );
     }
@@ -348,6 +368,8 @@ unsafe fn controls(window: HWND) {
         (EXIT, "Завершить работу"),
         (STARTUP, "Запускать с Windows"),
         (OUTPUT, "Выбрать выход микрофона"),
+        (TEST_MICROPHONE, "Проверить микрофон"),
+        (RECORD_MICROPHONE, "Записать 3 с и послушать"),
     ] {
         let child = CreateWindowExW(
             0,
@@ -370,22 +392,40 @@ unsafe fn controls(window: HWND) {
         SetWindowTextW(GetDlgItem(window, OUTPUT), wide(&selected).as_ptr());
     }
     layout(window);
+    sync_microphone_monitor(window);
 }
 unsafe fn layout(window: HWND) {
     let v = visual(window);
-    for id in [OUTPUT, SOUND, CABLE, BLUETOOTH, EXIT, STARTUP] {
+    for id in [
+        OUTPUT,
+        SOUND,
+        CABLE,
+        TEST_MICROPHONE,
+        RECORD_MICROPHONE,
+        BLUETOOTH,
+        EXIT,
+        STARTUP,
+    ] {
         ShowWindow(
             GetDlgItem(window, id),
-            if v.show_pairing { SW_HIDE } else { SW_SHOW },
+            if v.pairing.expanded { SW_HIDE } else { SW_SHOW },
         );
     }
     ShowWindow(
         GetDlgItem(window, COPY),
-        if v.show_pairing { SW_SHOW } else { SW_HIDE },
+        if v.pairing.expanded { SW_SHOW } else { SW_HIDE },
+    );
+    ShowWindow(
+        GetDlgItem(window, PAIR),
+        if v.pairing.expanded || !v.pairing.connected() {
+            SW_SHOW
+        } else {
+            SW_HIDE
+        },
     );
     SetWindowTextW(
         GetDlgItem(window, PAIR),
-        wide(if v.show_pairing {
+        wide(if v.pairing.expanded {
             "Готово"
         } else {
             "Добавить телефон"
@@ -397,25 +437,27 @@ unsafe fn layout(window: HWND) {
     for (id, x, y, w, h) in [
         (
             PAIR,
-            if v.show_pairing { 288 } else { 32 },
-            if v.show_pairing { 544 } else { 96 },
-            if v.show_pairing { 240 } else { 496 },
+            if v.pairing.expanded { 288 } else { 32 },
+            if v.pairing.expanded { 544 } else { 96 },
+            if v.pairing.expanded { 240 } else { 496 },
             40,
         ),
         (COPY, 32, 544, 240, 40),
         (OUTPUT, 32, 236, 496, 48),
         (SOUND, 32, 296, 242, 44),
         (CABLE, 286, 296, 242, 44),
-        (BLUETOOTH, 32, 440, 496, 44),
-        (EXIT, 324, 512, 220, 40),
-        (STARTUP, 16, 512, 296, 40),
+        (TEST_MICROPHONE, 32, 440, 242, 40),
+        (RECORD_MICROPHONE, 286, 440, 242, 40),
+        (BLUETOOTH, 32, 576, 496, 44),
+        (EXIT, 324, 648, 220, 40),
+        (STARTUP, 16, 648, 296, 40),
     ] {
         let child = GetDlgItem(window, id);
         SetWindowPos(
             child,
             null_mut(),
             v.px(x),
-            v.px(y),
+            v.px(v.content_y(y)),
             v.px(w),
             v.px(h),
             SWP_NOZORDER,
@@ -464,7 +506,16 @@ unsafe fn copy_code(window: HWND) {
 }
 unsafe fn resize(window: HWND) {
     let v = visual(window);
-    let mut area = v.rect(0, 0, 560, if v.show_pairing { 600 } else { 568 });
+    let mut area = v.rect(
+        0,
+        0,
+        560,
+        if v.pairing.expanded {
+            600
+        } else {
+            704 - v.connected_inset()
+        },
+    );
     AdjustWindowRectExForDpi(
         &mut area,
         GetWindowLongPtrW(window, GWL_STYLE) as u32,
@@ -509,7 +560,7 @@ unsafe fn paint(window: HWND) {
     let old = SelectObject(mem, bitmap as _);
     FillRect(mem, &area, v.background_brush);
     let app = APP.get().unwrap();
-    if v.show_pairing {
+    if v.pairing.expanded {
         v.round(mem, v.rect(16, 16, 528, 516), v.card, 20);
         v.text(
             mem,
@@ -552,9 +603,9 @@ unsafe fn paint(window: HWND) {
         }
     } else {
         for (title, y, height) in [
-            ("Телефон", 16, 136),
-            ("Микрофон", 164, 192),
-            ("Клавиатура и мышь", 368, 132),
+            ("Телефон", 16, 136 - v.connected_inset()),
+            ("Микрофон", 164, 328),
+            ("Клавиатура и мышь", 504, 132),
         ] {
             v.round(mem, v.rect(16, y, 528, height), v.card, 20);
             v.text(
@@ -566,7 +617,7 @@ unsafe fn paint(window: HWND) {
                 DT_SINGLELINE,
             );
         }
-        let connected = app.phone_connections() > 0;
+        let connected = v.pairing.connected();
         v.text(
             mem,
             if connected {
@@ -596,10 +647,71 @@ unsafe fn paint(window: HWND) {
             v.muted,
             DT_SINGLELINE | DT_END_ELLIPSIS,
         );
+        let test = v.microphone_test.as_ref().map(|test| test.snapshot());
+        v.text(
+            mem,
+            if test
+                .as_ref()
+                .is_some_and(|test| test.phase == crate::microphone_test::Phase::Playing)
+            {
+                "Запись CABLE Output · воспроизведение"
+            } else if test.is_some() {
+                "Входящий звук · CABLE Output"
+            } else {
+                "Проверка микрофона выключена"
+            },
+            v.rect(32, 344, 496, 18),
+            v.small,
+            v.muted,
+            DT_SINGLELINE | DT_END_ELLIPSIS,
+        );
+        let wave = v.rect(32, 364, 496, 44);
+        let middle = (wave.top + wave.bottom) / 2;
+        let brush = CreateSolidBrush(v.primary);
+        let baseline = CreateSolidBrush(v.muted);
+        for (i, level) in test
+            .iter()
+            .flat_map(|test| test.waveform.iter())
+            .enumerate()
+        {
+            let level = *level;
+            // Each bar holds a 50 ms peak; the history spans four seconds.
+            let amplitude = if level > 0. {
+                ((20. * level.log10() + 60.) / 60.).clamp(0., 1.)
+            } else {
+                0.
+            };
+            let height = ((amplitude * (wave.bottom - wave.top) as f32 / 2.) as i32).max(1);
+            let left = wave.left
+                + i as i32 * (wave.right - wave.left) / crate::microphone_test::BARS as i32;
+            FillRect(
+                mem,
+                &RECT {
+                    left,
+                    top: middle - height,
+                    right: left + v.px(3).max(1),
+                    bottom: middle + height,
+                },
+                if height > 1 { brush } else { baseline },
+            );
+        }
+        DeleteObject(brush as _);
+        DeleteObject(baseline as _);
+        v.text(
+            mem,
+            test.as_ref().map_or(
+                "Включите микрофон телефона и нажмите «Проверить микрофон»",
+                |test| test.message.as_str(),
+            ),
+            v.rect(32, 412, 496, 20),
+            v.small,
+            v.muted,
+            DT_SINGLELINE | DT_END_ELLIPSIS,
+        );
         v.text(
             mem,
             "Bluetooth · работает независимо от компаньона",
-            v.rect(32, 408, 496, 24),
+            v.rect(32, 544, 496, 24),
             v.small,
             v.muted,
             DT_SINGLELINE,
@@ -616,7 +728,7 @@ unsafe fn draw_button(window: HWND, item: &DRAWITEMSTRUCT) {
     FillRect(
         item.hDC,
         &item.rcItem,
-        if matches!(item.CtlID as i32, EXIT | STARTUP) || v.show_pairing {
+        if matches!(item.CtlID as i32, EXIT | STARTUP) || v.pairing.expanded {
             v.background_brush
         } else {
             v.card_brush
@@ -676,7 +788,13 @@ unsafe fn draw_button(window: HWND, item: &DRAWITEMSTRUCT) {
         &text,
         text_rect,
         v.normal,
-        if primary { v.on_primary } else { v.text },
+        if item.itemState & ODS_DISABLED != 0 {
+            v.muted
+        } else if primary {
+            v.on_primary
+        } else {
+            v.text
+        },
         (if output || startup {
             DT_LEFT | DT_END_ELLIPSIS
         } else {
@@ -705,6 +823,97 @@ unsafe fn draw_button(window: HWND, item: &DRAWITEMSTRUCT) {
         DeleteObject(pen as _);
     }
 }
+unsafe fn stop_microphone_test(window: HWND) {
+    if GetWindowLongPtrW(window, GWLP_USERDATA) == 0 {
+        return;
+    }
+    let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
+    v.microphone_test = None;
+    KillTimer(window, 3);
+    SetWindowTextW(
+        GetDlgItem(window, TEST_MICROPHONE),
+        wide("Проверить микрофон").as_ptr(),
+    );
+    SetWindowTextW(
+        GetDlgItem(window, RECORD_MICROPHONE),
+        wide("Записать 3 с и послушать").as_ptr(),
+    );
+    EnableWindow(
+        GetDlgItem(window, RECORD_MICROPHONE),
+        i32::from(
+            APP.get()
+                .unwrap()
+                .audio_active
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+    );
+}
+
+unsafe fn start_microphone_test(window: HWND) {
+    let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
+    v.microphone_test = Some(crate::microphone_test::MicrophoneTest::start());
+    SetWindowTextW(
+        GetDlgItem(window, TEST_MICROPHONE),
+        wide("Остановить проверку").as_ptr(),
+    );
+    SetTimer(window, 3, 50, None);
+}
+
+unsafe fn sync_microphone_monitor(window: HWND) {
+    let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
+    let active = APP
+        .get()
+        .unwrap()
+        .audio_active
+        .load(std::sync::atomic::Ordering::Relaxed);
+    EnableWindow(GetDlgItem(window, TEST_MICROPHONE), i32::from(active));
+    if v.microphone_test.is_some()
+        && (!active || v.pairing.expanded || IsWindowVisible(window) == 0 || IsIconic(window) != 0)
+    {
+        stop_microphone_test(window);
+        InvalidateRect(window, null(), 0);
+    }
+    EnableWindow(GetDlgItem(window, RECORD_MICROPHONE), i32::from(active));
+}
+
+unsafe fn sync_status(window: HWND) {
+    let status = APP.get().unwrap().status.lock().unwrap().clone();
+    let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
+    let connections = APP.get().unwrap().phone_connections();
+    let changed = v.pairing.sync(connections);
+    if v.status != status {
+        v.status = status;
+        InvalidateRect(window, null(), 0);
+    }
+    if changed {
+        resize(window);
+    }
+    sync_microphone_monitor(window);
+}
+
+unsafe fn set_window_active(window: HWND, active: bool) {
+    if GetWindowLongPtrW(window, GWLP_USERDATA) == 0 {
+        return;
+    }
+    let changed = {
+        let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
+        v.pairing
+            .set_active(active, APP.get().unwrap().phone_connections())
+    };
+    if active {
+        if changed {
+            resize(window);
+        }
+        SetWindowTextW(GetDlgItem(window, COPY), wide("Скопировать код").as_ptr());
+        sync_status(window);
+        SetTimer(window, 1, 500, None);
+    } else {
+        KillTimer(window, 1);
+        KillTimer(window, 2);
+        stop_microphone_test(window);
+    }
+}
+
 unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     match msg {
         WM_CREATE => {
@@ -725,10 +934,9 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             tray.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
             tray.uCallbackMessage = TRAY;
             tray.hIcon = visual(window).theme_icon;
-            let tip = wide("Air Remote");
+            let tip = wide("Air Companion");
             tray.szTip[..tip.len()].copy_from_slice(&tip);
             Shell_NotifyIconW(NIM_ADD, &tray);
-            SetTimer(window, 1, 500, None);
             0
         }
         WM_ERASEBKGND => 1,
@@ -762,8 +970,8 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
                 Box::into_raw(Box::new(Visual::new(fit_dpi(dpi, window), dpi))) as _,
             );
             let current = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
-            current.show_pairing = (*old).show_pairing;
-            current.connections = (*old).connections;
+            current.pairing = (*old).pairing;
+            current.microphone_test = (*old).microphone_test.take();
             layout(window);
             let mut tray: NOTIFYICONDATAW = std::mem::zeroed();
             tray.cbSize = size_of::<NOTIFYICONDATAW>() as _;
@@ -792,8 +1000,9 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             match (w & 0xffff) as i32 {
                 COPY => copy_code(window),
                 PAIR => {
+                    stop_microphone_test(window);
                     let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
-                    v.show_pairing = !v.show_pairing;
+                    v.pairing.expanded = !v.pairing.expanded;
                     resize(window);
                 }
                 EXIT => {
@@ -808,8 +1017,9 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
                     InvalidateRect(GetDlgItem(window, STARTUP), null(), 0);
                 }
                 CONNECT_PHONE => {
+                    stop_microphone_test(window);
                     let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
-                    v.show_pairing = true;
+                    v.pairing.expanded = true;
                     resize(window);
                     ShowWindow(window, SW_RESTORE);
                     SetForegroundWindow(window);
@@ -819,6 +1029,48 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
                     SetForegroundWindow(window);
                 }
                 BLUETOOTH => open(window, "ms-settings:bluetooth"),
+                TEST_MICROPHONE => {
+                    let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
+                    if v.microphone_test
+                        .as_ref()
+                        .is_some_and(|test| test.snapshot().phase.active())
+                    {
+                        stop_microphone_test(window);
+                    } else if APP
+                        .get()
+                        .unwrap()
+                        .audio_active
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        start_microphone_test(window);
+                    }
+                    sync_microphone_monitor(window);
+                    InvalidateRect(window, null(), 0);
+                }
+                RECORD_MICROPHONE => {
+                    let phase = visual(window)
+                        .microphone_test
+                        .as_ref()
+                        .map(|test| test.snapshot().phase);
+                    if phase.is_some_and(|phase| phase.testing()) {
+                        stop_microphone_test(window);
+                    } else if APP
+                        .get()
+                        .unwrap()
+                        .audio_active
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        // Recording is itself an explicit opt-in: no separate meter click is required.
+                        if !phase.is_some_and(|phase| phase.active()) {
+                            start_microphone_test(window);
+                        }
+                        if let Some(test) = &visual(window).microphone_test {
+                            test.record();
+                        }
+                    }
+                    sync_microphone_monitor(window);
+                    InvalidateRect(window, null(), 0);
+                }
                 SOUND => open(window, "ms-settings:sound"),
                 CABLE => {
                     let path = std::env::var("ProgramFiles")
@@ -872,28 +1124,64 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             if w == 2 {
                 SetWindowTextW(GetDlgItem(window, COPY), wide("Скопировать код").as_ptr());
                 KillTimer(window, 2);
-            } else {
-                let status = APP.get().unwrap().status.lock().unwrap().clone();
-                let v = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
-                let connections = APP.get().unwrap().phone_connections();
-                let collapse = connections > v.connections && v.show_pairing;
-                v.connections = connections;
-                if collapse {
-                    v.show_pairing = false;
+            } else if w == 3 {
+                sync_microphone_monitor(window);
+                let v = visual(window);
+                let phase = v.microphone_test.as_ref().map(|test| test.snapshot().phase);
+                if !phase.is_some_and(|phase| phase.active()) {
+                    KillTimer(window, 3);
                 }
-                if v.status != status {
-                    v.status = status;
-                    InvalidateRect(window, null(), 0);
+                for (id, label) in [
+                    (
+                        TEST_MICROPHONE,
+                        if phase.is_some_and(|phase| phase.active()) {
+                            "Остановить проверку"
+                        } else {
+                            "Проверить микрофон"
+                        },
+                    ),
+                    (
+                        RECORD_MICROPHONE,
+                        if phase.is_some_and(|phase| phase.testing()) {
+                            "Остановить запись"
+                        } else {
+                            "Записать 3 с и послушать"
+                        },
+                    ),
+                ] {
+                    let child = GetDlgItem(window, id);
+                    let mut old_label = [0u16; 80];
+                    let length = GetWindowTextW(child, old_label.as_mut_ptr(), 80);
+                    if String::from_utf16_lossy(&old_label[..length as usize]) != label {
+                        SetWindowTextW(child, wide(label).as_ptr());
+                    }
                 }
-                if collapse {
-                    resize(window);
+                InvalidateRect(window, &v.rect(16, 344, 528, 140), 0);
+            } else if w == 1 {
+                if IsWindowVisible(window) != 0 && IsIconic(window) == 0 {
+                    sync_status(window);
+                } else {
+                    // A queued timer message may arrive after the window was hidden.
+                    KillTimer(window, 1);
                 }
             }
             0
         }
         WM_CLOSE => {
+            stop_microphone_test(window);
             ShowWindow(window, SW_HIDE);
             0
+        }
+        WM_SHOWWINDOW => {
+            set_window_active(window, w != 0 && IsIconic(window) == 0);
+            DefWindowProcW(window, msg, w, l)
+        }
+        WM_SIZE => {
+            set_window_active(
+                window,
+                w != SIZE_MINIMIZED as usize && IsWindowVisible(window) != 0,
+            );
+            DefWindowProcW(window, msg, w, l)
         }
         TRAY => {
             if l as u32 == WM_LBUTTONUP {
@@ -918,7 +1206,7 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
                     menu,
                     MF_STRING,
                     SHOW as usize,
-                    wide("Открыть Air Remote").as_ptr(),
+                    wide("Открыть Air Companion").as_ptr(),
                 );
                 AppendMenuW(
                     menu,
@@ -959,6 +1247,7 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             0
         }
         WM_DESTROY => {
+            stop_microphone_test(window);
             let mut tray: NOTIFYICONDATAW = std::mem::zeroed();
             tray.cbSize = size_of::<NOTIFYICONDATAW>() as _;
             tray.hWnd = window;
@@ -1008,7 +1297,7 @@ pub fn run(app: Arc<App>) -> Result<()> {
         let window = CreateWindowExW(
             WS_EX_CONTROLPARENT,
             class.as_ptr(),
-            wide("Air Remote").as_ptr(),
+            wide("Air Companion").as_ptr(),
             style,
             x,
             y,
@@ -1022,6 +1311,7 @@ pub fn run(app: Arc<App>) -> Result<()> {
         if window.is_null() {
             bail!("Cannot create window");
         }
+        resize(window);
         if !std::env::args().any(|a| a == "--background") {
             ShowWindow(window, SW_SHOW);
         }

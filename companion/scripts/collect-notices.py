@@ -5,7 +5,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 metadata=json.loads(subprocess.check_output(['cargo','metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-gnu'],cwd=root))
 active={n['id'] for n in metadata['resolve']['nodes']}
-parts=['Air Remote Companion — third-party notices\n']
+parts=['Air Companion — third-party notices\n']
 for package in sorted(metadata['packages'],key=lambda p:p['name']):
     if package['id'] not in active or package['name']=='air-remote-companion':continue
     folder=Path(package['manifest_path']).parent
