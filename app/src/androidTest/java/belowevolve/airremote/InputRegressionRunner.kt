@@ -3,24 +3,51 @@ package belowevolve.airremote
 import android.app.Activity
 import android.app.Instrumentation
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /** Device-side checks use real EditText/InputConnection and Android Keystore. */
 class InputRegressionRunner : Instrumentation() {
     private var tvHost: String? = null
     private var tvSubmit = false
+    private var tvRawKey: String? = null
+    private var tvRawLaunchUri: String? = null
+    private var tvRawDelayMs: String? = null
+    private var clipboardFixture = false
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         tvHost = arguments?.getString("tvHost")
         tvSubmit = arguments?.getString("tvSubmit") == "true"
+        tvRawKey = arguments?.getString("tvRawKey")
+        tvRawLaunchUri = arguments?.getString("tvRawLaunchURI")
+        tvRawDelayMs = arguments?.getString("tvRawDelayMs")
+        clipboardFixture = arguments?.getString("clipboardFixture") == "true"
         start()
     }
     override fun onStart() {
         val results = Bundle()
         try {
+            if (clipboardFixture) {
+                require(tvHost == null && tvRawKey == null && tvRawLaunchUri == null) {
+                    "Clipboard fixture cannot be combined with TV probes"
+                }
+                checkClipboardFixture(results)
+                finish(Activity.RESULT_OK, results)
+                return
+            }
+            if (tvRawKey != null || tvRawLaunchUri != null) {
+                checkTvRawCommand(results)
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             runOnMainSync {
                 val editor = RemoteEditText(targetContext).apply { inputType = InputType.TYPE_CLASS_TEXT }
                 val updates = mutableListOf<TextFieldValue>()
@@ -59,6 +86,7 @@ class InputRegressionRunner : Instrumentation() {
                 editor.onValueChanged = null
             }
             checkDpadInput()
+            checkImeBatchRegression()
             tvHost?.let(::checkTvEditing)
             val first = TvIdentity(targetContext).certificate
             val second = TvIdentity(targetContext).certificate
@@ -69,10 +97,92 @@ class InputRegressionRunner : Instrumentation() {
             if (tvHost != null) results.putString("stream", results.getString("stream") + "TV authoritative email + middle insertion/deletion + cursor after reconnect: PASS\n")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {
-            results.putString("stream", error.stackTraceToString())
+            results.putString("stream", results.getString("stream", "") + error.stackTraceToString())
             finish(Activity.RESULT_CANCELED, results)
         }
     }
+
+    /** Opt-in observation only: bypasses RemoteModel and automatic wake entirely. */
+    private fun checkTvRawCommand(results: Bundle) {
+        val host = requireNotNull(tvHost?.takeIf { it.isNotBlank() }) { "tvHost is required" }
+        require((tvRawKey != null) != (tvRawLaunchUri != null)) {
+            "Choose one command: tvRawKey or tvRawLaunchURI"
+        }
+        val key = tvRawKey?.let { raw ->
+            requireNotNull(raw.toIntOrNull()?.takeIf { it >= 0 }) { "tvRawKey must be a nonnegative Android keycode" }
+        }
+        val uri = tvRawLaunchUri?.also { require(it.isNotBlank()) { "tvRawLaunchURI is empty" } }
+        val delayMs = tvRawDelayMs?.let { raw ->
+            requireNotNull(raw.toLongOrNull()?.takeIf { it in 0..5_000 }) { "tvRawDelayMs must be 0..5000" }
+        } ?: 0L
+        val timeoutMs = 30_000 + delayMs
+        data class Power(val atMs: Long, val on: Boolean)
+        val observations = LinkedBlockingQueue<Power>()
+        val failure = AtomicReference<Throwable>()
+        val closing = AtomicBoolean(false)
+        val timedOut = AtomicBoolean(false)
+        val client = TvClient(TvIdentity(targetContext))
+        val startedAt = SystemClock.elapsedRealtime()
+        fun report(line: String) {
+            results.putString("stream", results.getString("stream", "") + line + "\n")
+            sendStatus(0, Bundle().apply { putString("stream", line + "\n") })
+        }
+        val reader = Thread({
+            try {
+                client.listen(host, {}, {}, ready = { powered ->
+                    observations.offer(Power(SystemClock.elapsedRealtime() - startedAt, powered))
+                })
+            } catch (error: Throwable) {
+                if (!closing.get()) failure.set(error)
+            }
+        }, "TvRawProbeReader").apply { isDaemon = true }
+        // Socket writes are blocking; the independent deadline also closes a stalled writer.
+        val watchdog = Executors.newSingleThreadScheduledExecutor { task ->
+            Thread(task, "TvRawProbeDeadline").apply { isDaemon = true }
+        }
+        val deadline = watchdog.schedule({
+            timedOut.set(true)
+            client.close()
+        }, timeoutMs, TimeUnit.MILLISECONDS)
+        try {
+            reader.start()
+            var before: Power? = null
+            while (before == null && SystemClock.elapsedRealtime() - startedAt < 20_000) {
+                failure.get()?.let { throw it }
+                before = observations.poll(100, TimeUnit.MILLISECONDS)
+            }
+            var latest = checkNotNull(before) { "No TV ready/power callback within 20 seconds" }
+            report("RAW ready: screenPower=${latest.on}, callbackAtMs=${latest.atMs}, delayMs=$delayMs")
+            if (delayMs > 0) Thread.sleep(delayMs)
+            failure.get()?.let { throw it }
+            check(!timedOut.get()) { "Raw probe exceeded ${timeoutMs}ms deadline" }
+            while (true) latest = observations.poll() ?: break
+            report("RAW probe: screenPowerBefore=${latest.on}, callbackAtMs=${latest.atMs}; automaticWake=false")
+            val calledAt = SystemClock.elapsedRealtime() - startedAt
+            if (key != null) client.sendKey(key) else client.launchAppLink(checkNotNull(uri))
+            report("RAW command sent: ${key?.let { "key=$it" } ?: "launchURI"}, " +
+                "callAtMs=$calledAt, completedAtMs=${SystemClock.elapsedRealtime() - startedAt}")
+            var after: Power? = null
+            val observeUntil = SystemClock.elapsedRealtime() + 5_000
+            while (SystemClock.elapsedRealtime() < observeUntil) {
+                check(!timedOut.get()) { "Raw probe exceeded ${timeoutMs}ms deadline" }
+                failure.get()?.let { throw it }
+                val observation = observations.poll(100, TimeUnit.MILLISECONDS) ?: continue
+                after = observation
+                report("RAW power callback: screenPower=${observation.on}, callbackAtMs=${observation.atMs}")
+            }
+            report("RAW observation complete: screenPowerAfter=${after?.on ?: "unknown_no_new_callback"}, " +
+                "lastReportedPower=${after?.on ?: latest.on}; command delivery/visible wake requires TV observation")
+        } finally {
+            closing.set(true)
+            deadline.cancel(false)
+            watchdog.shutdownNow()
+            client.close()
+            reader.join(3_000)
+            check(!reader.isAlive) { "Raw probe reader did not stop after socket close" }
+        }
+    }
+
     /** Opt-in integration check. Requires an already paired TV with a focused search field. */
     private fun checkTvEditing(host: String) {
         val updates = java.util.concurrent.LinkedBlockingQueue<KeyboardUpdate>()

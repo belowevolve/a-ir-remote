@@ -91,8 +91,8 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
         return true
     }
 
-    @Synchronized fun release() {
-        if (closed) return
+    @Synchronized fun release(onReleased: () -> Unit = {}) {
+        if (closed) { onReleased(); return }
         generation++
         worker.queue.clear()
         nextKeyAt = 0
@@ -103,6 +103,7 @@ internal class PcHidOutput(private val transmit: (Int, ByteArray) -> Unit) {
             transmit(PcHidReports.KEYBOARD, PcHidReports.keyboard())
             transmit(PcHidReports.MOUSE, PcHidReports.mouse())
             transmit(PcHidReports.CONSUMER, PcHidReports.consumer())
+            onReleased()
         }
     }
 

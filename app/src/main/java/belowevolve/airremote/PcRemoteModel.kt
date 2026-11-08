@@ -6,6 +6,8 @@ import android.app.Application
 import android.bluetooth.*
 import android.content.*
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.core.content.edit
@@ -13,24 +15,38 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.resume
 
 @SuppressLint("MissingPermission") // Every entry point checks runtime permission; revocation is caught as well.
 class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     private val context = application
     private val adapter = application.getSystemService(BluetoothManager::class.java)?.adapter
     private var hid: BluetoothHidDevice? = null
-    private var requesting = false
-    private var registering = false
+    private var requesting by mutableStateOf(false)
+    private var registering by mutableStateOf(false)
     private var foreground = false
     private var enabled = false
     private var closed = false
     private var host by mutableStateOf<BluetoothDevice?>(null)
     private var pendingHost by mutableStateOf<BluetoothDevice?>(null)
+    private var connectingDeviceAddress by mutableStateOf<String?>(null)
     private var disconnectingHost: BluetoothDevice? = null
     private var output: PcHidOutput? = null
     private var reconnectJob: Job? = null
@@ -50,11 +66,57 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         private set
     var devices by mutableStateOf<List<BluetoothDevice>>(emptyList())
         private set
+    var refreshingDevices by mutableStateOf(false)
+        private set
+    private var devicesJob: Job? = null
+    val loadingDevices: Boolean get() = refreshingDevices || requesting || registering
     var dragging by mutableStateOf(false)
         private set
     var modifiers by mutableIntStateOf(0)
         private set
     private val prefs = application.getSharedPreferences("pc_remote", Context.MODE_PRIVATE)
+    var autoKeyboard by mutableStateOf(prefs.getBoolean("auto_keyboard", false))
+        private set
+    var keyboardFocusRequest by mutableIntStateOf(0)
+        private set
+    var keyboardScreenActive = false
+        private set
+    fun setKeyboardScreenActive(active: Boolean) {
+        if (keyboardScreenActive == active) return
+        keyboardScreenActive = active
+        consumedKeyboardFocus = keyboardFocusRequest
+        lastFocusEvent = -1L
+        if (autoKeyboard && enabled && foreground) companion.refreshTextFocus()
+    }
+    private var consumedKeyboardFocus = 0
+    internal fun consumeKeyboardFocus(): Boolean {
+        val pending = keyboardFocusRequest > consumedKeyboardFocus
+        consumedKeyboardFocus = keyboardFocusRequest
+        return pending && autoKeyboard && keyboardScreenActive && nativeKeyboardSupported
+    }
+    val pcName: String get() = selectedDeviceName ?: companionHost ?: "Компьютер"
+    fun reconnectCompanion() { companion.stop(); if (enabled && foreground) companion.start() }
+    private var lastFocusEvent = -1L
+    var waveformEnabled by mutableStateOf(application.getSharedPreferences("microphone", Context.MODE_PRIVATE).getBoolean("waveform", false))
+        private set
+    fun updateWaveform(enabled: Boolean) {
+        waveformEnabled = enabled
+        MicrophoneService.setWaveform(context, enabled)
+    }
+    var iconMeterEnabled by mutableStateOf(application.getSharedPreferences("microphone", Context.MODE_PRIVATE).getBoolean("icon_meter", true))
+        private set
+    fun updateIconMeter(enabled: Boolean) {
+        iconMeterEnabled = enabled
+        MicrophoneService.setIconMeter(context, enabled)
+    }
+    fun updateAutoKeyboard(enabled: Boolean) {
+        if (autoKeyboard == enabled) return
+        autoKeyboard = enabled
+        lastFocusEvent = -1L
+        prefs.edit { putBoolean("auto_keyboard", enabled) }
+        if (this.enabled && foreground) companion.refreshTextFocus()
+    }
+    fun forgetCurrentPc() { forgetCompanion(); forgetPc() }
     var russianLayout by mutableStateOf(prefs.getBoolean("russian_layout", false))
         private set
 
@@ -64,12 +126,57 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         private set
     var companionError by mutableStateOf<String?>(null)
         private set
+    var clipboardSupported by mutableStateOf(false)
+        private set
+    var clipboardBusy by mutableStateOf(false)
+        private set
+    var clipboardResult by mutableStateOf<String?>(null)
+        private set
+    private var clipboardJob: Job? = null
+    private var clipboardTransfer: ClipboardTransfer? = null
+    private var nativeKeyboardCapability by mutableStateOf(false)
+    val nativeKeyboardSupported: Boolean get() = companionConnected && nativeKeyboardCapability
+    internal var nativeKeyboardStatus by mutableStateOf(PcTextStatus.CLOSED)
+        private set
+    internal var nativeKeyboardValue by mutableStateOf(TextFieldValue())
+        private set
+    internal var nativeKeyboardMessage by mutableStateOf("")
+        private set
+    internal var nativeKeyboardInitializationReady by mutableStateOf(false)
+        private set
+    private var nativeKeyboardSessionId = 0
+    private var nativeKeyboardAwaitingCapability = false
+    private var nativeKeyboardInitial: PcTextSnapshot? = null
+    private var nativeKeyboardInitialApplied: CompletableDeferred<Unit>? = null
+    internal var nativeKeyboardKeyAck by mutableStateOf<PcTextAck?>(null)
+        private set
+    private var nativeKeyboardKeyApplied: CompletableDeferred<Unit>? = null
+    private var nativeKeyboardJob: Job? = null
+    private var nativeKeyboardTransport: PcTextTransport? = null
+    private var nativeKeyboardPlan: PcTextPlan? = null
+    private var nativeKeyboardSignal: Channel<Unit>? = null
     private var companionEndpoint by mutableStateOf(CompanionEndpoint.load(application))
     val hasCompanion: Boolean get() = companionEndpoint != null
     val companionHost: String? get() = companionEndpoint?.host
     private val companion = CompanionClient(application, viewModelScope,
         onConnecting = { companionConnecting = it && hasCompanion },
-        onStatus = { active, error -> companionConnected = active; companionError = error.takeIf { hasCompanion } },
+        onStatus = { active, error ->
+            companionConnected = active
+            companionError = error.takeIf { hasCompanion }
+            // Text has its own TLS connection; a control reconnect must not cancel it.
+        },
+        onCapabilities = {
+            clipboardSupported = ClipboardText.CAPABILITY in it
+            nativeKeyboardCapability = PcTextSnapshot.CAPABILITY in it
+
+        },
+        watchTextFocus = { autoKeyboard && keyboardScreenActive },
+        onTextFocus = { sequence ->
+            if (lastFocusEvent != sequence) {
+                lastFocusEvent = sequence
+                if (foreground && enabled && keyboardScreenActive && autoKeyboard && nativeKeyboardSupported) keyboardFocusRequest++
+            }
+        },
         onLayout = { language ->
             if (language == "ru" || language == "en") {
                 russianLayout = language == "ru"
@@ -79,17 +186,292 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     )
     fun pairCompanion(code: String) {
         val endpoint = CompanionEndpoint.parse(code)
+        interruptNativeKeyboard("Подключение изменилось. Открой клавиатуру заново.")
+        cancelClipboard()
         companion.stop()
         CompanionEndpoint.save(context, endpoint)
         companionEndpoint = endpoint
         companion.start()
     }
     fun forgetCompanion() {
+        interruptNativeKeyboard("Компаньон отключён. Локальный текст сохранён.")
+        cancelClipboard()
         MicrophoneService.stop(context)
         companion.stop()
         CompanionEndpoint.save(context, null)
         companionEndpoint = null
         companionError = null
+    }
+
+    fun clearClipboardResult() { clipboardResult = null }
+
+    fun pasteClipboard() {
+        if (!foreground || !companionConnected || !clipboardSupported || clipboardBusy) return
+        val endpoint = companionEndpoint ?: return
+        val text = try {
+            // Read only the foreground user's explicit tap. Never coerce a URI or read
+            // the clipboard on focus/resume, and never retain it in model state.
+            val clip = context.getSystemService(ClipboardManager::class.java).primaryClip
+            val value = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
+                ?: throw IllegalArgumentException("В буфере нет текста")
+            ClipboardText.validate(value)
+            value
+        } catch (error: IllegalArgumentException) {
+            clipboardResult = error.message
+            return
+        } catch (_: SecurityException) {
+            clipboardResult = "Нет доступа к буферу телефона"
+            return
+        }
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val network = manager.activeNetwork
+        if (network == null || manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) != true) {
+            clipboardResult = "Для компаньона нужен Wi-Fi"
+            return
+        }
+        clipboardResult = null
+        clipboardBusy = true
+        val transfer = ClipboardTransfer()
+        clipboardTransfer = transfer
+        clipboardJob = viewModelScope.launch {
+            try {
+                modifiers = 0
+                dragging = false
+                // Wait for our own queued releases, not an arbitrary transport delay.
+                withTimeout(2000) {
+                    suspendCancellableCoroutine { continuation ->
+                        val current = output
+                        if (current == null) continuation.resume(Unit)
+                        else current.release { if (continuation.isActive) continuation.resume(Unit) }
+                    }
+                }
+                clipboardResult = withTimeout(10000) { transfer.send(endpoint, network, text) }
+            } catch (_: TimeoutCancellationException) {
+                clipboardResult = "Не удалось подтвердить вставку. Проверь ПК"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // A lost reply is ambiguous: the PC may already have applied the paste.
+                clipboardResult = "Не удалось подтвердить вставку. Проверь ПК"
+            } finally {
+                transfer.cancel()
+                if (clipboardTransfer === transfer) {
+                    clipboardTransfer = null
+                    clipboardBusy = false
+                }
+            }
+        }
+    }
+
+    private fun cancelClipboard() {
+        clipboardTransfer?.cancel()
+        clipboardTransfer = null
+        clipboardJob?.cancel()
+        clipboardJob = null
+        clipboardBusy = false
+        clipboardResult = null
+    }
+
+    /** Each visible opening reads the current non-password PC field once. No session is replayed. */
+    internal fun openNativeKeyboard(): Int {
+        stopNativeKeyboard()
+        val session = ++nativeKeyboardSessionId
+        nativeKeyboardValue = TextFieldValue()
+        nativeKeyboardMessage = ""
+        val endpoint = companionEndpoint
+        if (!foreground || !enabled || endpoint == null) {
+            failNativeKeyboard(if (endpoint == null) "Подключи Air Companion" else "Открой клавиатуру заново")
+            return session
+        }
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val network = manager.activeNetwork
+        if (network == null || manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) != true) {
+            failNativeKeyboard("Нет подключения к Wi-Fi")
+            return session
+        }
+        val transfer = PcTextTransport()
+        val signal = Channel<Unit>(Channel.CONFLATED)
+        val initialApplied = CompletableDeferred<Unit>()
+        nativeKeyboardTransport = transfer
+        nativeKeyboardSignal = signal
+        nativeKeyboardInitialApplied = initialApplied
+        nativeKeyboardAwaitingCapability = true
+        nativeKeyboardStatus = PcTextStatus.CONNECTING
+        nativeKeyboardJob = viewModelScope.launch {
+            try {
+                // This is the initial connection only. Losing a live connection below
+                // terminates the session instead of waiting and replaying its text.
+                withTimeout(7000) { snapshotFlow { nativeKeyboardSupported }.first { it } }
+                nativeKeyboardAwaitingCapability = false
+                modifiers = 0
+                dragging = false
+                withTimeout(2000) {
+                    suspendCancellableCoroutine { continuation ->
+                        val current = output
+                        if (current == null) continuation.resume(Unit)
+                        else current.release { if (continuation.isActive) continuation.resume(Unit) }
+                    }
+                }
+                nativeKeyboardInitial = withTimeout(7000) { transfer.open(endpoint, network) }
+                nativeKeyboardInitializationReady = true
+                // The UI flushes any still-open IME batch before merging fresh typing
+                // into the received selection; an initial reply cannot overwrite it.
+                withTimeout(7000) { initialApplied.await() }
+                val plan = checkNotNull(nativeKeyboardPlan)
+                for (ignored in signal) {
+                    while (true) {
+                        val frame = plan.next() ?: break
+                        val ack = withTimeout(7000) { transfer.send(frame) }
+                        if (ack.context == null) plan.acknowledge(ack.revision)
+                        else {
+                            val applied = CompletableDeferred<Unit>()
+                            nativeKeyboardKeyApplied = applied
+                            nativeKeyboardKeyAck = ack
+                            // Flush a newer IME batch before rebasing it onto the observed field.
+                            withTimeout(7000) { applied.await() }
+                        }
+                    }
+                }
+            } catch (_: TimeoutCancellationException) {
+                if (nativeKeyboardTransport === transfer) failNativeKeyboard(
+                    if (nativeKeyboardAwaitingCapability && companionConnected) "Обнови Air Companion" else "Нет ответа от ПК. Открой клавиатуру заново.")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (nativeKeyboardTransport === transfer) failNativeKeyboard(nativeKeyboardFailure(error.message))
+            } finally {
+                transfer.cancel()
+                signal.close()
+                if (nativeKeyboardTransport === transfer) {
+                    nativeKeyboardTransport = null
+                    nativeKeyboardPlan?.stop()
+                    nativeKeyboardPlan = null
+                    nativeKeyboardSignal = null
+                    nativeKeyboardInitial = null
+                    nativeKeyboardInitialApplied = null
+                    nativeKeyboardKeyAck = null
+                    nativeKeyboardKeyApplied = null
+                    nativeKeyboardInitializationReady = false
+                    nativeKeyboardAwaitingCapability = false
+                }
+            }
+        }
+        return session
+    }
+
+    internal fun finishNativeKeyboardInitialization(session: Int): TextFieldValue? {
+        if (session != nativeKeyboardSessionId || nativeKeyboardStatus != PcTextStatus.CONNECTING) return null
+        val initial = nativeKeyboardInitial ?: return null
+        return try {
+            val value = PcTextField.initialize(initial, nativeKeyboardValue)
+            nativeKeyboardPlan = PcTextPlan(initial).apply { edit(PcTextField.snapshot(value)) }
+            nativeKeyboardValue = value
+            nativeKeyboardInitial = null
+            nativeKeyboardInitializationReady = false
+            nativeKeyboardStatus = PcTextStatus.ACTIVE
+            nativeKeyboardInitialApplied?.complete(Unit)
+            nativeKeyboardSignal?.trySend(Unit)
+            value
+        } catch (_: IllegalArgumentException) {
+            interruptNativeKeyboard("Текст слишком длинный или содержит неподдерживаемые символы")
+            null
+        }
+    }
+
+    internal fun finishNativeKeyboardKey(session: Int): TextFieldValue? {
+        if (session != nativeKeyboardSessionId || nativeKeyboardStatus != PcTextStatus.ACTIVE) return null
+        val ack = nativeKeyboardKeyAck ?: return null
+        return try {
+            val rebased = nativeKeyboardPlan?.acknowledge(ack.revision, ack.context)?.let { observed ->
+                val shift = observed.start - nativeKeyboardValue.selection.start
+                val composition = nativeKeyboardValue.composition?.let {
+                    TextRange((it.start + shift).coerceIn(0, observed.text.length), (it.end + shift).coerceIn(0, observed.text.length))
+                }
+                TextFieldValue(observed.text, TextRange(observed.start, observed.end), composition).also { nativeKeyboardValue = it }
+            }
+            nativeKeyboardKeyAck = null
+            nativeKeyboardKeyApplied?.complete(Unit)
+            nativeKeyboardKeyApplied = null
+            rebased
+        } catch (_: IllegalArgumentException) {
+            interruptNativeKeyboard("Текст слишком длинный или содержит неподдерживаемые символы")
+            null
+        }
+    }
+
+    internal fun editNativeKeyboard(session: Int, value: TextFieldValue) {
+        if (session != nativeKeyboardSessionId || nativeKeyboardStatus == PcTextStatus.CLOSED) return
+        val normalized = PcTextField.normalize(value)
+        nativeKeyboardValue = normalized
+        if (nativeKeyboardStatus == PcTextStatus.STOPPED) return // Keep local edits; never reconnect or replay them.
+        try {
+            val snapshot = PcTextField.snapshot(normalized)
+            if (nativeKeyboardStatus == PcTextStatus.ACTIVE && nativeKeyboardPlan?.edit(snapshot) == true) {
+                nativeKeyboardSignal?.trySend(Unit)
+            }
+        } catch (_: IllegalArgumentException) {
+            interruptNativeKeyboard("Текст слишком длинный или содержит неподдерживаемые символы")
+        }
+    }
+
+    internal fun nativeKeyboardKey(session: Int, name: String, count: Int = 1) {
+        if (session != nativeKeyboardSessionId || nativeKeyboardStatus != PcTextStatus.ACTIVE) return
+        try {
+            if (nativeKeyboardPlan?.key(name, count.coerceIn(1, 64)) == true) {
+                val predicted = checkNotNull(nativeKeyboardPlan).value()
+                nativeKeyboardValue = TextFieldValue(predicted.text, TextRange(predicted.start, predicted.end))
+                nativeKeyboardSignal?.trySend(Unit)
+            }
+        } catch (_: IllegalArgumentException) {
+            interruptNativeKeyboard("Текст слишком длинный или содержит неподдерживаемые символы")
+        }
+    }
+
+    internal fun closeNativeKeyboard(session: Int) {
+        if (session == nativeKeyboardSessionId) stopNativeKeyboard()
+    }
+    internal fun leaveNativeKeyboard(session: Int) {
+        if (session == nativeKeyboardSessionId) interruptNativeKeyboard("Ввод остановлен. Открой клавиатуру заново.")
+    }
+
+    private fun failNativeKeyboard(message: String) {
+        nativeKeyboardStatus = PcTextStatus.STOPPED
+        nativeKeyboardMessage = message
+    }
+
+    private fun interruptNativeKeyboard(message: String) {
+        if (nativeKeyboardStatus != PcTextStatus.CONNECTING && nativeKeyboardStatus != PcTextStatus.ACTIVE) return
+        stopNativeKeyboard()
+        failNativeKeyboard(message)
+    }
+
+    private fun stopNativeKeyboard() {
+        nativeKeyboardTransport?.cancel()
+        nativeKeyboardTransport = null
+        nativeKeyboardJob?.cancel()
+        nativeKeyboardJob = null
+        nativeKeyboardSignal?.close()
+        nativeKeyboardSignal = null
+        nativeKeyboardPlan?.stop()
+        nativeKeyboardPlan = null
+        nativeKeyboardInitialApplied?.cancel()
+        nativeKeyboardInitialApplied = null
+        nativeKeyboardKeyApplied?.cancel()
+        nativeKeyboardKeyApplied = null
+        nativeKeyboardKeyAck = null
+        nativeKeyboardInitial = null
+        nativeKeyboardInitializationReady = false
+        nativeKeyboardAwaitingCapability = false
+        nativeKeyboardStatus = PcTextStatus.CLOSED
+    }
+
+    private fun nativeKeyboardFailure(code: String?): String = when (code) {
+        "focus_changed" -> "Поле на ПК сменилось. Открой клавиатуру заново."
+        "input_busy", "busy" -> "Отпусти клавиши ПК и открой клавиатуру заново"
+        "unsupported_target" -> "Выбери поле текста на ПК"
+        "unsupported_edit" -> "Это поле не поддерживается"
+        "invalid_text", "text_too_large", "invalid_selection" -> "Неподдерживаемый текст"
+        else -> "Ввод остановлен. Проверь текст на ПК и открой клавиатуру заново."
     }
 
     fun toggleKeyboardLayout() {
@@ -111,15 +493,18 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
 
     private inline fun safely(block: () -> Unit) {
         try { block() } catch (_: SecurityException) {
+            connectingDeviceAddress = null
             connected = false
             connectionError = "Нет доступа к Bluetooth"
         } catch (_: IllegalStateException) {
+            connectingDeviceAddress = null
             connected = false
             connectionError = "Bluetooth недоступен"
         }
     }
 
     private fun clearConnection() {
+        connectingDeviceAddress = null
         output?.close(); output = null
         host = null
         connected = false
@@ -151,6 +536,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) = safely {
+            if (closed) return@safely
             when (state) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     if (!selection.accepts(device.address) || !registered || disconnectingHost == device) {
@@ -174,6 +560,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                     host = device
                     deviceName = device.name ?: "Компьютер"
                     connected = true
+                    connectingDeviceAddress = null
                     reconnectJob?.cancel()
                     keyboardLeds = 0
                     capsLock = false
@@ -184,7 +571,9 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 BluetoothProfile.STATE_CONNECTING -> {
                     if (!selection.accepts(device.address)) hid?.disconnect(device)
                     else {
+                        connectingDeviceAddress = device.address
                         if (host == null) host = device
+                        if (host == device) connected = false
                         connectionError = ""
                     }
                 }
@@ -302,10 +691,10 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resume() { foreground = true; refreshBluetoothState(); if (enabled) { companion.start(); start(); scheduleReconnect() } }
-    fun pause() { companion.stop(); releaseInputs(); foreground = false; reconnectJob?.cancel() }
+    fun pause() { interruptNativeKeyboard("Ввод остановлен. Открой клавиатуру заново."); cancelClipboard(); companion.stop(); releaseInputs(); foreground = false; reconnectJob?.cancel() }
     fun activate() { enabled = true; companion.start(); start(); scheduleReconnect() }
-    fun deactivate() { companion.stop(); releaseInputs(); enabled = false; reconnectJob?.cancel() }
-    fun permissionDenied() { connectionError = "Нет доступа к устройствам поблизости" }
+    fun deactivate() { interruptNativeKeyboard("Ввод остановлен. Открой клавиатуру заново."); cancelClipboard(); companion.stop(); releaseInputs(); enabled = false; reconnectJob?.cancel() }
+    fun permissionDenied() { connectingDeviceAddress = null; connectionError = "Нет доступа к устройствам поблизости" }
 
     private fun keepConnection() {
         // Start while the Activity is visible, before Android lowers the UID's importance.
@@ -329,6 +718,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         if (!hasPermission()) { permissionDenied(); return@safely }
         if (adapter == null) { connectionError = "На телефоне нет Bluetooth"; return@safely }
         if (bluetoothState != BluetoothAdapter.STATE_ON) {
+            connectingDeviceAddress = null
             connectionError = if (bluetoothState == BluetoothAdapter.STATE_OFF) "Bluetooth выключен" else ""
             return@safely
         }
@@ -350,17 +740,35 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 800, 9, 0, 11250, BluetoothHidDeviceAppQosSettings.MAX,
             ), context.mainExecutor, callback,
         ) == true
-        if (!registering) connectionError = "Не удалось запустить службу клавиатуры"
+        connectionError = if (registering) "" else "Не удалось запустить службу клавиатуры"
+        if (!registering) connectingDeviceAddress = null
     }
-    fun refreshDevices() = safely {
-        if (hasPermission()) devices = adapter?.bondedDevices?.sortedBy { it.name ?: it.address }.orEmpty()
+    fun refreshDevices() {
+        if (!hasPermission() || devicesJob?.isActive == true) return
+        refreshingDevices = true
+        devicesJob = viewModelScope.launch {
+            try {
+                devices = withContext(Dispatchers.IO) {
+                    adapter?.bondedDevices?.sortedBy { it.name ?: it.address }.orEmpty()
+                }
+                if (foreground && enabled && registered && !connected && host == null && pendingHost == null && selection.allowed)
+                    devices.firstOrNull { it.address == selection.address }?.let(::connect)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: SecurityException) {
+                permissionDenied()
+            } catch (_: IllegalStateException) {
+                connectionError = "Bluetooth недоступен"
+            } finally {
+                refreshingDevices = false
+            }
+        }
     }
     val hasSelectedDevice: Boolean get() = selection.address != null
     val selectedDeviceName: String?
         get() = devices.firstOrNull { it.address == selection.address }?.let(::deviceLabel)
             ?: deviceName.takeIf { connected }
-    fun isConnectingDevice(device: BluetoothDevice) = selection.allowed && isSelectedDevice(device) &&
-        connectionError.isEmpty() && (pendingHost == device || (host == device && !connected))
+    fun isConnectingDevice(device: BluetoothDevice) = connectingDeviceAddress == device.address
     fun isSelectedDevice(device: BluetoothDevice) = device.address == selection.address
     fun deviceLabel(device: BluetoothDevice): String = try { device.name ?: device.address } catch (_: SecurityException) { "Компьютер" }
     fun connect(device: BluetoothDevice): Unit = safely {
@@ -368,11 +776,16 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         connectionError = ""
         selection.select(device.address)
         prefs.edit { putString("host", device.address); putBoolean("auto_connect", true) }
+        if (host == device && connected) { connectingDeviceAddress = null; return@safely }
+        connectingDeviceAddress = device.address
         pendingHost = device
         if (!registered) { start(); return@safely }
         if (disconnectingHost != null) return@safely
         val current = host
-        if (current == device && connected) { pendingHost = null; return@safely }
+        if (current == device && hid?.getConnectionState(device) == BluetoothProfile.STATE_CONNECTING) {
+            pendingHost = null
+            return@safely
+        }
         if (current != null && current != device) {
             releaseInputs()
             if (hid?.disconnect(current) == true) {
@@ -381,6 +794,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 connectionError = ""
             } else {
                 pendingHost = null
+                connectingDeviceAddress = null
                 connectionError = "Не удалось отключить текущий ПК"
             }
             return@safely
@@ -391,11 +805,19 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             host = device // Also track an in-flight connection so it can be cancelled.
             connectionError = ""
         } else {
-            if (!connected) stopKeepingConnection()
-            connectionError = "Не удалось подключиться к ПК"
+            when (hid?.getConnectionState(device)) {
+                BluetoothProfile.STATE_CONNECTING -> host = device
+                BluetoothProfile.STATE_CONNECTED -> callback.onConnectionStateChanged(device, BluetoothProfile.STATE_CONNECTED)
+                else -> {
+                    connectingDeviceAddress = null
+                    if (!connected) stopKeepingConnection()
+                    connectionError = "Не удалось подключиться к ПК"
+                }
+            }
         }
     }
     fun disconnect() = safely {
+        connectingDeviceAddress = null
         reconnectJob?.cancel()
         selection.disconnect()
         pendingHost = null
@@ -465,6 +887,8 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         output?.release()
     }
     override fun onCleared() {
+        stopNativeKeyboard()
+        cancelClipboard()
         companion.stop()
         closed = true
         enabled = false

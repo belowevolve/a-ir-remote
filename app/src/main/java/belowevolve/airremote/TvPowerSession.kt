@@ -4,8 +4,8 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import remote.Remotemessage.RemoteDirection
 
 /** Screen power is independent of the authenticated remote connection. */
 internal class TvPowerSession(
@@ -42,6 +42,13 @@ internal class TvPowerSession(
         else (awakening ?: Wake().also { awakening = it }).also { it.sent = true }.ready
     }
 
+    fun keySent(code: Int, direction: RemoteDirection) {
+        // A held power key can wake the TV on key-down, before its screen-on ACK.
+        // Releasing a key alone must not make later commands wait for a nonexistent wake.
+        if ((code == 26 || code == 177) &&
+            (direction == RemoteDirection.SHORT || direction == RemoteDirection.START_LONG)) explicitWakeSent()
+    }
+
     fun failed(request: CompletableDeferred<Unit>?, error: Exception) = synchronized(lock) {
         if (request != null && awakening?.ready === request) {
             request.completeExceptionally(error)
@@ -62,7 +69,9 @@ internal class TvPowerSession(
                 val remaining = synchronized(lock) {
                     enteredStandbyAt?.let { standbyTransitionMillis - (nowMillis() - it) } ?: 0
                 }
-                delay(remaining)
+                // A physical remote or another client can finish waking the TV
+                // while it settles. Its screen-on confirmation ends this wait.
+                if (remaining > 0) withTimeoutOrNull(remaining) { request.ready.await() }
                 val send = synchronized(lock) {
                     (awakening === request && screenOn == false && !request.sent)
                         .also { if (it) request.sent = true }
@@ -73,15 +82,10 @@ internal class TvPowerSession(
             if (withTimeoutOrNull(timeoutMillis) { request.ready.await() } == null)
                 throw SocketTimeoutException("ТВ не подтвердил включение экрана. Попробуй ещё раз")
         } catch (error: Exception) {
-            failed(request.ready, if (error is CancellationException) IOException("Ожидание пробуждения отменено", error) else error)
+            // Cancelling a follower must not fail the owner's shared wake.
+            if (owner || error !is CancellationException)
+                failed(request.ready, if (error is CancellationException) IOException("Ожидание пробуждения отменено", error) else error)
             throw error
-        }
-    }
-
-    companion object {
-        fun shouldWakeBeforeKey(code: Int): Boolean = when (code) {
-            26, 177, 223, 224, 276 -> false // Power toggles and explicit sleep/wake commands.
-            else -> true
         }
     }
 }

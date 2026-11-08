@@ -18,6 +18,7 @@ fun RemoteModes(pc: PcRemoteModel, onPcActivated: () -> Unit, onModeChanged: (Bo
     var mode by rememberSaveable { mutableIntStateOf(if (MicrophoneService.status.value.active) 2 else 0) }
     val fullscreenPc = mode == 1 && LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     BackHandler(enabled = fullscreenPc) { mode = 0 }
+    LaunchedEffect(mode) { pc.setKeyboardScreenActive(mode == 1) }
     val pcMode = mode != 0
     DisposableEffect(pcMode) {
         onModeChanged(pcMode)

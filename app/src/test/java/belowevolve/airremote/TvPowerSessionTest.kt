@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
+import remote.Remotemessage.RemoteDirection
 
 class TvPowerSessionTest {
     @Test fun unknownOrAwakeScreenNeverGetsAnUnrequestedPowerToggle() = runBlocking {
@@ -66,6 +67,58 @@ class TvPowerSessionTest {
         power.update(true)
         command.join()
         assertTrue(launched)
+    }
+
+    @Test fun heldPowerWakeWaitsForAcknowledgementWithoutTogglingAgain() = runBlocking {
+        for (key in listOf(26, 177)) {
+            val power = TvPowerSession(standbyTransitionMillis = 0)
+            power.update(false)
+            power.keySent(key, RemoteDirection.START_LONG)
+            power.keySent(key, RemoteDirection.END_LONG)
+            var extraToggles = 0
+            var launched = false
+            val command = launch(start = CoroutineStart.UNDISPATCHED) {
+                power.ensureAwake { extraToggles++ }
+                launched = true
+            }
+            assertFalse(launched)
+            power.update(true)
+            command.join()
+            assertEquals("Held POWER already started waking the TV", 0, extraToggles)
+            assertTrue(launched)
+        }
+    }
+
+    @Test fun powerReleaseAndUnrelatedHoldDoNotClaimToWakeTheScreen() = runBlocking {
+        for ((key, direction) in listOf(26 to RemoteDirection.END_LONG, 23 to RemoteDirection.START_LONG)) {
+            val power = TvPowerSession(standbyTransitionMillis = 0)
+            power.update(false)
+            power.keySent(key, direction)
+            var toggles = 0
+            power.ensureAwake { toggles++; power.update(true) }
+            assertEquals(1, toggles)
+        }
+    }
+
+    @Test fun holdingPowerWhileAwakeDoesNotLeaveAPendingWakeForLaterStandby() = runBlocking {
+        val power = TvPowerSession(standbyTransitionMillis = 0)
+        power.update(true)
+        power.keySent(26, RemoteDirection.START_LONG)
+        power.keySent(26, RemoteDirection.END_LONG)
+        power.update(false)
+        var toggles = 0
+        power.ensureAwake { toggles++; power.update(true) }
+        assertEquals(1, toggles)
+    }
+
+    @Test fun queuedReconnectWakeUsesCurrentScreenStateBeforeSendingPower() = runBlocking {
+        val power = TvPowerSession(standbyTransitionMillis = 0)
+        power.update(false) // The connection's first status schedules an automatic wake.
+        var toggles = 0
+        val queuedWake: suspend () -> Unit = { power.ensureAwake { toggles++ } }
+        power.update(true) // A physical remote wakes the TV before the queued action runs.
+        queuedWake()
+        assertEquals(0, toggles)
     }
 
     @Test fun reconnectDropsOldWaitWithoutDeliveringItsCommandOrCancellingConsumer() = runBlocking {
@@ -156,8 +209,34 @@ class TvPowerSessionTest {
         command.join()
     }
 
-    @Test fun explicitPowerAndSleepKeysBypassAutomaticWake() {
-        for (key in listOf(26, 177, 223, 224, 276)) assertFalse(TvPowerSession.shouldWakeBeforeKey(key))
-        for (key in listOf(3, 4, 19, 23, 84, 164, 178, 183, 186)) assertTrue(TvPowerSession.shouldWakeBeforeKey(key))
+    @Test fun confirmedScreenOnEndsTheStandbyWaitImmediately() = runBlocking {
+        val power = TvPowerSession(standbyTransitionMillis = 5000)
+        power.update(true)
+        power.update(false)
+        var delivered = false
+        val command = launch(start = CoroutineStart.UNDISPATCHED) {
+            power.ensureAwake { fail("An already confirmed screen must not receive POWER") }
+            delivered = true
+        }
+        power.update(true)
+        withTimeout(500) { command.join() }
+        assertTrue(delivered)
+    }
+
+    @Test fun cancellingOneWaiterDoesNotCancelAnotherCommandsWake() = runBlocking {
+        val power = TvPowerSession(standbyTransitionMillis = 0)
+        power.update(false)
+        var delivered = false
+        val owner = launch(start = CoroutineStart.UNDISPATCHED) {
+            power.ensureAwake {}
+            delivered = true
+        }
+        val waiter = launch(start = CoroutineStart.UNDISPATCHED) {
+            power.ensureAwake { fail("Waiters must share the owner's POWER") }
+        }
+        waiter.cancelAndJoin()
+        power.update(true)
+        owner.join()
+        assertTrue(delivered)
     }
 }

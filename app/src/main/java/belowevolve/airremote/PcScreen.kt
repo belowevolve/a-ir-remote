@@ -1,203 +1,289 @@
 package belowevolve.airremote
 
-import android.Manifest
-import android.bluetooth.BluetoothAdapter
-import android.content.Intent
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import android.widget.Toast
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Dialpad
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Devices
-import androidx.compose.material.icons.rounded.KeyboardHide
+import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.KeyboardHide
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import belowevolve.shared.design.RemoteIcons
 
 @Composable
 internal fun PcScreen(model: PcRemoteModel, landscape: Boolean = false) {
-    var devicesVisible by rememberSaveable { mutableStateOf(false) }
+    var deviceDialog by rememberSaveable { mutableStateOf<PcDialogPage?>(null) }
     var keyboardVisible by rememberSaveable { mutableStateOf(true) }
     var numpad by rememberSaveable { mutableStateOf(false) }
     val russian = model.russianLayout
-    var launchError by remember { mutableStateOf("") }
-    var companionVisible by rememberSaveable { mutableStateOf(false) }
-    var settingsVisible by rememberSaveable { mutableStateOf(false) }
-    val bluetooth = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { model.start() }
-    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (model.hasPermission()) { model.start(); devicesVisible = true } else model.permissionDenied()
+    var androidKeyboardVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(model.keyboardFocusRequest) {
+        if (model.consumeKeyboardFocus() && deviceDialog == null) androidKeyboardVisible = true
+    }
+    LaunchedEffect(model.nativeKeyboardSupported) {
+        if (!model.nativeKeyboardSupported && androidKeyboardVisible) {
+            androidKeyboardVisible = false
+        }
+    }
+    fun keyboard() {
+        if (model.nativeKeyboardSupported) androidKeyboardVisible = true
+        else deviceDialog = model.connectionPage()
     }
     val view = LocalView.current
+    LaunchedEffect(model.clipboardResult) {
+        model.clipboardResult?.let { result ->
+            Toast.makeText(view.context, result, Toast.LENGTH_SHORT).show()
+            model.clearClipboardResult()
+        }
+    }
     DisposableEffect(view) {
         val previous = view.keepScreenOn
         view.keepScreenOn = true
-        onDispose { view.keepScreenOn = previous; model.releaseInputs() }
-    }
-    fun launch(intent: Intent) {
-        try { bluetooth.launch(intent); launchError = "" }
-        catch (_: android.content.ActivityNotFoundException) { launchError = "Открой настройки Bluetooth телефона вручную" }
-        catch (_: SecurityException) { model.permissionDenied() }
+        onDispose {
+            view.keepScreenOn = previous
+            model.releaseInputs()
+        }
     }
     val trackpadVisible = !landscape || !keyboardVisible
-    PcPointerSurface(model, trackpadVisible) { trackpadArea ->
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val keyHeight = if (landscape) (maxHeight - KeyboardLayout.RowGap * (KeyboardLayout.ROW_COUNT - 1)) / KeyboardLayout.ROW_COUNT else KeyboardLayout.keyHeight(maxHeight)
-            val toolbarSize = minOf(KeyboardLayout.ToolbarSize, keyHeight)
-            val toolbar: @Composable () -> Unit = {
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                    Column(Modifier.width(KeyboardLayout.ToolbarSize * 4), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
-                            listOf(false, true).forEach { right ->
-                                Surface(
-                                    onClick = { model.click(right) },
-                                    enabled = model.connected,
-                                    modifier = Modifier.weight(1f).height(keyHeight),
-                                    shape = KeyboardLayout.KeyShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            painterResource(if (right) R.drawable.ic_mouse_right else R.drawable.ic_mouse_left),
-                                            if (right) "Правая кнопка мыши" else "Левая кнопка мыши",
-                                            Modifier.size(RemoteLayout.ActionIconSize),
-                                        )
+    ConnectionGate(model.connected || model.companionConnected, "Подключить ПК", { deviceDialog = model.connectionPage() }) {
+        PcPointerSurface(model, trackpadVisible, onConnect = { deviceDialog = model.connectionPage() }) { trackpadArea ->
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val keyHeight =
+                    if (landscape) {
+                        ((maxHeight -
+                                KeyboardLayout.ToolbarSize -
+                                KeyboardLayout.RowGap * (KeyboardLayout.ROW_COUNT - 1)) /
+                                KeyboardLayout.ROW_COUNT)
+                            .coerceAtLeast(0.dp)
+                    } else KeyboardLayout.keyHeight(maxHeight)
+                val canPaste = model.companionConnected && model.clipboardSupported
+                val toolbarSize = minOf(KeyboardLayout.ToolbarSize, keyHeight)
+                val languageSwitch: @Composable () -> Unit = {
+                    Box(
+                        Modifier.size(toolbarSize)
+                            .clip(CircleShape)
+                            .combinedClickable(
+                                role = Role.Button,
+                                onClickLabel = "Сменить язык ПК и подписи клавиш",
+                                onClick = { if (model.connected) model.switchLanguage() else deviceDialog = model.connectionPage() },
+                                onDoubleClick = { if (model.connected) model.toggleKeyboardLayout() else deviceDialog = model.connectionPage() },
+                            )
+                            .semantics {
+                                customActions =
+                                    listOf(
+                                        CustomAccessibilityAction("Сменить только подписи клавиш") {
+                                            model.toggleKeyboardLayout()
+                                            true
+                                        }
+                                    )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Rounded.Language,
+                            if (russian) "Язык: русский" else "Язык: английский",
+                        )
+                    }
+                }
+                val toolbar: @Composable () -> Unit = {
+                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                        Column(
+                            Modifier.width(KeyboardLayout.ToolbarSize * 4),
+                            verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap),
+                            ) {
+                                listOf(false, true).forEach { right ->
+                                    Surface(
+                                        onClick = {
+                                            if (model.connected) model.click(right)
+                                            else deviceDialog = model.connectionPage()
+                                        },
+                                        modifier = Modifier.weight(1f).height(keyHeight),
+                                        shape = KeyboardLayout.KeyShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                painterResource(
+                                                    if (right) R.drawable.ic_mouse_right
+                                                    else R.drawable.ic_mouse_left
+                                                ),
+                                                if (right) "Правая кнопка мыши"
+                                                else "Левая кнопка мыши",
+                                                Modifier.size(RemoteLayout.ActionIconSize),
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Row(Modifier.height(keyHeight), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(toolbarSize).clip(CircleShape)
-                                    .combinedClickable(
-                                        role = Role.Button,
-                                        onClickLabel = "Сменить язык ПК и подписи клавиш",
-                                        onClick = model::switchLanguage,
-                                        onDoubleClick = model::toggleKeyboardLayout,
-                                    )
-                                    .semantics {
-                                        customActions = listOf(CustomAccessibilityAction("Сменить только подписи клавиш") {
-                                            model.toggleKeyboardLayout()
-                                            true
-                                        })
+                            Row(
+                                Modifier.fillMaxWidth().height(keyHeight),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    Modifier.width(KeyboardLayout.ToolbarSize).height(toolbarSize),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            if (canPaste) model.pasteClipboard()
+                                            else deviceDialog = model.connectionPage()
+                                        },
+                                        enabled = !model.clipboardBusy,
+                                        modifier = Modifier.fillMaxSize(),
+                                    ) {
+                                        Icon(Icons.Rounded.ContentPaste, "Вставить на ПК")
+                                    }
+                                }
+                                IconButton(
+                                    onClick = ::keyboard,
+                                    modifier =
+                                        Modifier.width(KeyboardLayout.ToolbarSize).height(toolbarSize),
+                                ) {
+                                    Icon(Icons.Rounded.Keyboard, "Клавиатура Android")
+                                }
+                                IconToggleButton(
+                                    checked = numpad,
+                                    onCheckedChange = {
+                                        numpad = it
+                                        keyboardVisible = true
                                     },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.Rounded.Language, if (russian) "Язык: русский" else "Язык: английский")
-                            }
-                            IconToggleButton(
-                                checked = numpad,
-                                onCheckedChange = { numpad = it; keyboardVisible = true },
-                                modifier = Modifier.size(toolbarSize),
-                            ) {
-                                Icon(if (numpad) Icons.Rounded.Keyboard else Icons.Rounded.Dialpad,
-                                    if (numpad) "Показать буквенную клавиатуру" else "Показать нумпад и дополнительные клавиши")
-                            }
-                            IconButton(onClick = { keyboardVisible = !keyboardVisible }, modifier = Modifier.size(toolbarSize)) {
-                                Icon(if (keyboardVisible) Icons.Rounded.KeyboardHide else Icons.Rounded.Keyboard,
-                                    if (keyboardVisible) "Скрыть клавиатуру" else "Показать клавиатуру")
-                            }
-                            IconButton(onClick = { settingsVisible = true }, modifier = Modifier.size(toolbarSize)) {
-                                Icon(Icons.Rounded.Tune, "Настройки")
+                                    modifier =
+                                        Modifier.width(KeyboardLayout.ToolbarSize).height(toolbarSize),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Dialpad,
+                                        if (numpad) "Показать буквенную клавиатуру"
+                                        else "Показать нумпад и дополнительные клавиши",
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { keyboardVisible = !keyboardVisible },
+                                    modifier =
+                                        Modifier.width(KeyboardLayout.ToolbarSize).height(toolbarSize),
+                                ) {
+                                    if (keyboardVisible)
+                                        Icon(Icons.Rounded.KeyboardHide, "Скрыть клавиатуру")
+                                    else
+                                        Icon(
+                                            painterResource(R.drawable.ic_keyboard_show),
+                                            "Показать клавиатуру",
+                                        )
+                                }
                             }
                         }
                     }
                 }
-            }
-            Column(Modifier.fillMaxSize()) {
-                if (!landscape) Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
-                    AppHeader(if (model.connected) model.deviceName else "Подключить ПК",
-                        onAction = {
-                        devicesVisible = true
-                        if (model.hasPermission()) model.start()
-                    }, actionIcon = Icons.Rounded.Devices,
-                        actionDescription = if (model.connected) "Устройства" else "Подключить")
-                }
-                if (!landscape) Spacer(Modifier.height(RemoteLayout.SmallGap))
-                if (trackpadVisible) {
-                    Box(Modifier.padding(horizontal = if (landscape) KeyboardLayout.EdgePadding else RemoteLayout.ScreenPadding).weight(1f)) {
-                        Trackpad(trackpadArea.fillMaxSize())
+                Column(Modifier.fillMaxSize()) {
+                    if (landscape)
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .height(KeyboardLayout.ToolbarSize)
+                                    .padding(horizontal = KeyboardLayout.EdgePadding),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        deviceDialog = model.deviceDialogPage(DeviceKind.PC)
+                                    },
+                                    modifier = Modifier.size(KeyboardLayout.ToolbarSize),
+                                ) {
+                                    Icon(
+                                        if (model.connected)
+                                            ImageVector.vectorResource(RemoteIcons.Tune)
+                                        else Icons.Rounded.Devices,
+                                        if (model.connected)
+                                            "Настройки ПК"
+                                        else "Подключить ПК",
+                                        Modifier.size(RemoteLayout.HeaderIconSize),
+                                    )
+                                }
+                            }
+                        }
+                    if (!landscape)
+                        Box(Modifier.padding(horizontal = RemoteLayout.ScreenPadding)) {
+                            AppHeader(
+                                if (model.connected) model.deviceName
+                                else "Подключить ПК",
+                                onAction = {
+                                    deviceDialog = model.deviceDialogPage(DeviceKind.PC)
+                                },
+                                actionIcon =
+                                    if (model.connected)
+                                        ImageVector.vectorResource(RemoteIcons.Tune)
+                                    else Icons.Rounded.Devices,
+                                actionDescription =
+                                    if (model.connected) "Настройки ПК"
+                                    else "Подключить ПК",
+                            )
+                        }
+                    if (!landscape) Spacer(Modifier.height(RemoteLayout.SmallGap))
+                    if (trackpadVisible) {
+                        Box(Modifier.padding(horizontal = KeyboardLayout.EdgePadding).weight(1f)) {
+                            Trackpad(trackpadArea.fillMaxSize())
+                        }
+                        Spacer(Modifier.height(KeyboardLayout.RowGap))
                     }
-                    Spacer(Modifier.height(KeyboardLayout.RowGap))
-                }
-                if (keyboardVisible) {
-                    PcKeyboard(model, russian, keyHeight, numpad, landscape = landscape, toolbar = toolbar)
-                } else {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { toolbar() }
+                    if (keyboardVisible) {
+                        PcKeyboard(
+                            model,
+                            russian,
+                            onConnect = { deviceDialog = model.connectionPage() },
+                            keyHeight,
+                            numpad,
+                            landscape = landscape,
+                            toolbar = toolbar,
+                            languageSwitch = languageSwitch,
+                        )
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = KeyboardLayout.EdgePadding),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.TopStart) {
+                                Box(
+                                    (if (landscape) Modifier.width(56.dp) else Modifier.fillMaxWidth())
+                                        .height(keyHeight),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    languageSwitch()
+                                }
+                            }
+                            toolbar()
+                            Spacer(Modifier.weight(if (landscape) 1f else 1.65f))
+                        }
+                    }
                 }
             }
         }
     }
-    if (devicesVisible) RemoteDialog(
-        onDismissRequest = { devicesVisible = false },
-        title = { Text(model.selectedDeviceName?.let { "ПК · $it" } ?: "Подключить ПК") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-                FilledTonalButton(onClick = { devicesVisible = false; companionVisible = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (model.companionConnected) "Компаньон" else if (model.hasCompanion && model.companionError == null) "Компаньон · подключение…" else "Подключить компаньон")
-                }
-                HorizontalDivider()
-                Text("Bluetooth · клавиатура и мышь", style = MaterialTheme.typography.titleSmall)
-                if (!model.hasPermission()) TextButton(onClick = {
-                    permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
-                }) { Text("Разрешить Bluetooth") }
-                if (model.connectionError.isNotBlank()) Text(model.connectionError, color = MaterialTheme.colorScheme.error)
-                if (model.bluetoothState == BluetoothAdapter.STATE_OFF) TextButton(onClick = { launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }) { Text("Включить Bluetooth") }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-                    FilledTonalButton(modifier = Modifier.weight(1.6f), contentPadding = PaddingValues(horizontal = RemoteLayout.Gap), enabled = model.registered, onClick = {
-                        if (Build.VERSION.SDK_INT >= 31 && view.context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-                            permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
-                        else { model.preparePairing(); launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)) }
-                    }) { Text("Видимость · 2 мин") }
-                    OutlinedButton(modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = RemoteLayout.Gap), onClick = model::start) { Text("Обновить") }
-                }
-                if (launchError.isNotEmpty()) Text(launchError)
-                DialogActionGroup {
-                    model.devices.forEach { device ->
-                        DialogActionRow(model.deviceLabel(device), selected = model.isSelectedDevice(device), loading = model.isConnectingDevice(device), enabled = model.registered) {
-                            model.connect(device)
-                        }
-                    }
-                }
-            }
-        },
-        dismissButton = if (model.hasSelectedDevice) ({ TextButton(onClick = { model.forgetPc(); if (!model.hasSelectedDevice) devicesVisible = false }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Забыть ПК") } }) else null,
-        confirmButton = { TextButton(onClick = { devicesVisible = false }) { Text("Готово") } },
-    )
-    if (companionVisible) CompanionDialog(model) { companionVisible = false }
-    if (settingsVisible) {
-        RemoteDialog(
-            onDismissRequest = { settingsVisible = false },
-            title = { Text("Настройки") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap)) {
-                    if (landscape) FilledTonalButton(onClick = { settingsVisible = false; devicesVisible = true }, modifier = Modifier.fillMaxWidth()) { Text("Подключить ПК") }
-                    Text("Тачпад", style = MaterialTheme.typography.titleSmall)
-                    Text("Чувствительность: ${"%.1f".format(model.sensitivity)}×")
-                    Slider(
-                        value = model.sensitivity,
-                        onValueChange = model::updateSensitivity,
-                        valueRange = PcPointerSensitivity.Range,
-                        steps = 36,
-                    )
-                }
-            },
-            confirmButton = { TextButton(onClick = { settingsVisible = false }) { Text("Готово") } },
-        )
+    deviceDialog?.let { page ->
+        PcDeviceDialog(model, initialPage = page, onDismiss = { deviceDialog = null })
     }
+    if (androidKeyboardVisible && model.nativeKeyboardSupported)
+        PcTextEntry(model) { androidKeyboardVisible = false }
 }

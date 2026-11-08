@@ -1,8 +1,6 @@
 package belowevolve.airremote
 
-import com.google.protobuf.ByteString
 import com.google.protobuf.CodedOutputStream
-import belowevolve.airremote.mic.MicrophoneProtocol
 import java.io.DataInputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -29,19 +27,45 @@ internal object MicTransport {
         }
     }
 
-    fun frame(samples: FloatArray, count: Int, muted: Boolean, pcmFloat: Boolean): ByteArray {
-        require(count in (1..samples.size))
-        val pcm = ByteBuffer.allocate(count * if (pcmFloat) 4 else 2).order(ByteOrder.LITTLE_ENDIAN)
-        for (i in 0 until count) {
-            val value = if (muted) 0f else samples[i].coerceIn(-1f, 1f)
-            if (pcmFloat) pcm.putFloat(value) else pcm.putShort((value * 32767).toInt().toShort())
+    /** One writer owns this reusable frame; write it before calling encode again. */
+    class Encoder(private val pcmFloat: Boolean, private val count: Int = SAMPLES) {
+        private val pcmBytes = count * if (pcmFloat) 4 else 2
+        private val prefixBytes = 1 + CodedOutputStream.computeUInt32SizeNoTag(pcmBytes)
+        private val payloadBytes = prefixBytes + pcmBytes +
+            CodedOutputStream.computeUInt32Size(2, RATE) +
+            CodedOutputStream.computeUInt32Size(3, 1) +
+            CodedOutputStream.computeUInt32Size(4, if (pcmFloat) 4 else 2)
+        private val bytes = ByteArray(4 + payloadBytes)
+        private val pcm = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+
+        init {
+            require(count in 1..SAMPLES)
+            ByteBuffer.wrap(bytes).putInt(payloadBytes)
+            CodedOutputStream.newInstance(bytes, 4, prefixBytes).apply {
+                writeTag(1, 2)
+                writeUInt32NoTag(pcmBytes)
+                checkNoSpaceLeft()
+            }
+            CodedOutputStream.newInstance(bytes, 4 + prefixBytes + pcmBytes,
+                payloadBytes - prefixBytes - pcmBytes).apply {
+                writeUInt32(2, RATE)
+                writeUInt32(3, 1)
+                writeUInt32(4, if (pcmFloat) 4 else 2)
+                checkNoSpaceLeft()
+            }
         }
-        val message = MicrophoneProtocol.AudioPacket.newBuilder()
-            .setBuffer(ByteString.copyFrom(pcm.array())).setSampleRate(RATE)
-            .setChannelCount(1).setAudioFormat(if (pcmFloat) 4 else 2).build()
-        val size = message.serializedSize
-        val frame = ByteBuffer.allocate(4 + size).putInt(size).array()
-        message.writeTo(CodedOutputStream.newInstance(frame, 4, size))
-        return frame
+
+        fun encode(samples: FloatArray, muted: Boolean): ByteArray {
+            require(samples.size >= count)
+            pcm.position(4 + prefixBytes)
+            for (i in 0 until count) {
+                val value = if (muted || !samples[i].isFinite()) 0f else samples[i].coerceIn(-1f, 1f)
+                if (pcmFloat) pcm.putFloat(value) else pcm.putShort((value * 32767).toInt().toShort())
+            }
+            return bytes
+        }
     }
+
+    fun frame(samples: FloatArray, count: Int, muted: Boolean, pcmFloat: Boolean): ByteArray =
+        Encoder(pcmFloat, count).encode(samples, muted)
 }

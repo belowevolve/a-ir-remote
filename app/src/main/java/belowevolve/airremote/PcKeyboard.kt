@@ -33,8 +33,8 @@ private val numpadRows = listOf(
 private val repeatKeys = setOf(42, 75, 76, 78)
 
 @Composable
-internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = KeyboardLayout.KeyHeight, numpad: Boolean = false, landscape: Boolean = false, toolbar: @Composable () -> Unit = {}) {
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp, LocalKeyHeight provides keyHeight) {
+internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, onConnect: () -> Unit, keyHeight: Dp = KeyboardLayout.KeyHeight, numpad: Boolean = false, landscape: Boolean = false, toolbar: @Composable () -> Unit = {}, languageSwitch: @Composable () -> Unit = {}) {
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp, LocalKeyHeight provides keyHeight, LocalKeyboardConnection provides onConnect) {
         Column(Modifier.fillMaxWidth().padding(horizontal = KeyboardLayout.EdgePadding), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
             (if (numpad) numpadRows else keyboardRows).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(KeyboardLayout.KeyGap)) {
@@ -66,7 +66,8 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.BottomStart) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(KeyboardLayout.RowGap)) {
+                    Box((if (landscape) Modifier.width(56.dp) else Modifier.fillMaxWidth()).height(keyHeight), contentAlignment = Alignment.Center) { languageSwitch() }
                     PcKey("Win", if (landscape) Modifier.width(56.dp) else Modifier.fillMaxWidth(), model.connected) { model.windowsKey() }
                 }
                 Box(Modifier.width(KeyboardLayout.ToolbarSize * 4), contentAlignment = Alignment.Center) { toolbar() }
@@ -86,6 +87,7 @@ internal fun PcKeyboard(model: PcRemoteModel, russian: Boolean, keyHeight: Dp = 
 }
 
 private val LocalKeyHeight = compositionLocalOf { KeyboardLayout.KeyHeight }
+private val LocalKeyboardConnection = compositionLocalOf<() -> Unit> { {} }
 
 @Composable
 private fun PcKey(
@@ -97,6 +99,7 @@ private fun PcKey(
     click: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val connect = LocalKeyboardConnection.current
     val pressed by interaction.collectIsPressedAsState()
     val currentClick by rememberUpdatedState(click)
     var repeating by remember { mutableStateOf(false) }
@@ -113,12 +116,12 @@ private fun PcKey(
     Surface(
         modifier = modifier.height(LocalKeyHeight.current).clip(KeyboardLayout.KeyShape)
             .combinedClickable(
-                enabled = enabled,
+                enabled = true,
                 role = Role.Button,
                 interactionSource = interaction,
                 indication = ripple(),
-                onClick = { currentClick() },
-                onLongClick = if (repeatOnHold) ({ repeating = true }) else null,
+                onClick = { if (enabled) currentClick() else connect() },
+                onLongClick = if (repeatOnHold && enabled) ({ repeating = true }) else null,
             ),
         shape = KeyboardLayout.KeyShape,
         color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,

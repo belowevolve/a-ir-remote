@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.net.Socket
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
@@ -27,15 +28,30 @@ internal data class MicStatus(
     val active: Boolean = false,
     val streaming: Boolean = false,
     val muted: Boolean = false,
+    val failed: Boolean = false,
     val message: String = "Готов к подключению",
     val format: String = "48 кГц · моно · PCM без сжатия",
     val peak: Float = 0f,
     val dropped: Long = 0,
+    val sentFrames: Long = 0,
+    val waveform: List<Float> = emptyList(),
 )
 
 /** Owns recording independently of activities. Never restarts recording without a user action. */
 class MicrophoneService : Service() {
     companion object {
+        @Volatile private var waveformEnabled = false
+        @Volatile private var iconMeterEnabled = true
+        fun setWaveform(context: Context, enabled: Boolean) {
+            context.getSharedPreferences("microphone", Context.MODE_PRIVATE).edit().putBoolean("waveform", enabled).apply()
+            waveformEnabled = enabled
+            if (!enabled) mutableStatus.update { it.copy(peak = if (iconMeterEnabled) it.peak else 0f, waveform = emptyList()) }
+        }
+        fun setIconMeter(context: Context, enabled: Boolean) {
+            context.getSharedPreferences("microphone", Context.MODE_PRIVATE).edit().putBoolean("icon_meter", enabled).apply()
+            iconMeterEnabled = enabled
+            if (!enabled && !waveformEnabled) mutableStatus.update { it.copy(peak = 0f) }
+        }
         private val mutableStatus = MutableStateFlow(MicStatus())
         internal val status = mutableStatus.asStateFlow()
         private const val LOG_TAG = "AirRemoteMic"
@@ -68,10 +84,17 @@ class MicrophoneService : Service() {
 
     override fun onBind(intent: Intent?) = null
 
+    override fun onCreate() {
+        super.onCreate()
+        waveformEnabled = getSharedPreferences("microphone", Context.MODE_PRIVATE).getBoolean("waveform", false)
+        iconMeterEnabled = getSharedPreferences("microphone", Context.MODE_PRIVATE).getBoolean("icon_meter", true)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { stopSelf(); return START_NOT_STICKY }
         if (intent?.action == MUTE) {
             if (session != null) {
+                // Keep the timeline: muted frames append silence and move old peaks out naturally.
                 mutableStatus.update { it.copy(muted = !it.muted, peak = 0f) }
                 notifyStatus()
             } else stopSelf()
@@ -110,7 +133,8 @@ class MicrophoneService : Service() {
                     closeSocket()
                     withContext(NonCancellable + Dispatchers.Main) {
                         if (!destroyed) {
-                            mutableStatus.update { it.copy(active = false, streaming = false, peak = 0f,
+                            mutableStatus.update { it.copy(active = false, streaming = false,
+                                peak = 0f, failed = failure != null,
                                 message = failure ?: "Трансляция остановлена") }
                             stopSelf()
                         }
@@ -118,15 +142,13 @@ class MicrophoneService : Service() {
                 }
             }
         } catch (e: Exception) {
-            mutableStatus.value = MicStatus(message = e.message ?: "Не удалось запустить микрофон")
+            mutableStatus.value = MicStatus(failed = true, message = e.message ?: "Не удалось запустить микрофон")
             stopSelf()
         }
         return START_NOT_STICKY
     }
 
     private suspend fun stream(endpoint: CompanionEndpoint, natural: Boolean) = coroutineScope {
-        val host = endpoint.host
-        val port = endpoint.port
         if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED)
             throw SecurityException("Нет доступа к устройствам поблизости")
         val cm = getSystemService(ConnectivityManager::class.java)
@@ -153,14 +175,18 @@ class MicrophoneService : Service() {
         suppressor?.let { runCatching { it.enabled = true } }
         try {
             ensureActive()
-            // Initialize protobuf/PCM serialization before the hardware starts accumulating audio.
-            MicTransport.frame(FloatArray(MicTransport.SAMPLES), MicTransport.SAMPLES, muted = false, pcmFloat = floatPcm)
+            val encoder = MicTransport.Encoder(floatPcm)
             val output = connection.getOutputStream()
             audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
                 it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC
             }?.let { record.setPreferredDevice(it) }
             val diagnostics = BuildConfig.DEBUG || Log.isLoggable(LOG_TAG, Log.DEBUG)
-            val frames = Channel<CapturedFrame>(capacity = MicTransport.QUEUED_FRAMES)
+            // Exactly enough buffers for the bounded queue, the reader and the writer.
+            val pool = ArrayBlockingQueue<FloatArray>(MicTransport.QUEUED_FRAMES + 2).apply {
+                repeat(MicTransport.QUEUED_FRAMES + 2) { add(FloatArray(MicTransport.SAMPLES)) }
+            }
+            val frames = Channel<CapturedFrame>(capacity = MicTransport.QUEUED_FRAMES,
+                onUndeliveredElement = { pool.offer(it.samples) })
             if (diagnostics) Log.d(LOG_TAG, "captureBufferMs=${record.bufferSizeInFrames * 1000 / MicTransport.RATE} sendBufferBytes=${connection.sendBufferSize}")
             val started = SystemClock.elapsedRealtime()
             val progress = AtomicLong(started)
@@ -184,16 +210,18 @@ class MicrophoneService : Service() {
                     Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
                     val shorts = ShortArray(MicTransport.SAMPLES)
                     var ticks = 0
+                    var peak = 0f
                     var framesRead = 0L
                     val timestamp = if (diagnostics) AudioTimestamp() else null
+                    mutableStatus.update { it.copy(message = "Начало передачи…",
+                        format = "48 кГц · моно · ${if (floatPcm) "Float32" else "PCM16"} · ${if (unprocessed) "без обработки" else if (natural) "распознавание речи" else "связь"}") }
+                    // Prepare UI state before capture begins, so startup work cannot build
+                    // an initial hardware backlog. Notification IPC stays off this thread.
+                    launch(Dispatchers.Main) { notifyStatus() }
                     record.startRecording()
                     check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Микрофон недоступен" }
-                    mutableStatus.update { it.copy(streaming = true, message = "Передача на $host:$port",
-                        format = "48 кГц · моно · ${if (floatPcm) "Float32" else "PCM16"} · ${if (unprocessed) "без обработки" else if (natural) "распознавание речи" else "связь"}") }
-                    // Notification IPC must not delay the first read or the TCP writer.
-                    launch(Dispatchers.Main) { notifyStatus() }
                     while (isActive) {
-                        val samples = FloatArray(MicTransport.SAMPLES)
+                        val samples = checkNotNull(pool.poll()) { "Буфер микрофона недоступен" }
                         var offset = 0
                         while (offset < samples.size) {
                             ensureActive()
@@ -215,14 +243,24 @@ class MicrophoneService : Service() {
                         }
                         // Keep draining the hardware during mute; silence replaces the captured frame.
                         if (mutableStatus.value.muted) samples.fill(0f)
+                        val measure = waveformEnabled || iconMeterEnabled
+                        if (measure) peak = maxOf(peak, samples.maxOf { abs(it) }.coerceIn(0f, 1f)) else peak = 0f
                         val frame = CapturedFrame(samples, System.nanoTime())
                         if (!frames.trySend(frame).isSuccess) {
-                            frames.tryReceive()
-                            frames.trySend(frame)
-                            mutableStatus.update { it.copy(dropped = it.dropped + 1) }
+                            var discarded = 0
+                            frames.tryReceive().getOrNull()?.let { pool.offer(it.samples); discarded++ }
+                            if (!frames.trySend(frame).isSuccess) { pool.offer(samples); discarded++ }
+                            // The writer can drain the queue after trySend fails. A retry
+                            // that evicts nothing and succeeds has not lost an audio frame.
+                            if (discarded > 0) mutableStatus.update { it.copy(dropped = it.dropped + discarded) }
                         }
-                        if (++ticks % 10 == 0) mutableStatus.update { state ->
-                            state.copy(peak = if (state.muted) 0f else samples.maxOf { abs(it) }.coerceIn(0f, 1f))
+                        if (++ticks % 5 == 0 && measure) {
+                            val level = peak
+                            mutableStatus.update { state ->
+                                state.copy(peak = if (state.muted) 0f else level,
+                                    waveform = if (waveformEnabled) (state.waveform + if (state.muted) 0f else level).takeLast(64) else emptyList())
+                            }
+                            peak = 0f
                         }
                     }
                 } finally {
@@ -233,19 +271,28 @@ class MicrophoneService : Service() {
             try {
                 var framesWritten = 0
                 for (frame in frames) {
-                    ensureActive()
-                    val writeStarted = System.nanoTime()
-                    if (!MicTransport.isFresh(frame.capturedAt, writeStarted)) {
-                        mutableStatus.update { it.copy(dropped = it.dropped + 1) }
-                        continue
-                    }
-                    val samples = frame.samples
-                    output.write(MicTransport.frame(samples, samples.size, mutableStatus.value.muted, floatPcm))
-                    progress.set(SystemClock.elapsedRealtime())
-                    val writeMs = (System.nanoTime() - writeStarted) / 1_000_000
-                    if (diagnostics && (++framesWritten % 100 == 0 || writeMs >= 100)) {
-                        val queueMs = (writeStarted - frame.capturedAt) / 1_000_000.0
-                        Log.d(LOG_TAG, "queueMs=$queueMs writeMs=$writeMs dropped=${mutableStatus.value.dropped}")
+                    try {
+                        ensureActive()
+                        val writeStarted = System.nanoTime()
+                        if (!MicTransport.isFresh(frame.capturedAt, writeStarted)) {
+                            mutableStatus.update { it.copy(dropped = it.dropped + 1) }
+                            continue
+                        }
+                        output.write(encoder.encode(frame.samples, mutableStatus.value.muted))
+                        progress.set(SystemClock.elapsedRealtime())
+                        framesWritten++
+                        if (framesWritten == 1 || framesWritten % 10 == 0) {
+                            mutableStatus.update { it.copy(streaming = true, sentFrames = framesWritten.toLong(),
+                                message = "Передача на ${endpoint.host}") }
+                            if (framesWritten == 1) launch(Dispatchers.Main) { notifyStatus() }
+                        }
+                        val writeMs = (System.nanoTime() - writeStarted) / 1_000_000
+                        if (diagnostics && (framesWritten % 100 == 0 || writeMs >= 100)) {
+                            val queueMs = (writeStarted - frame.capturedAt) / 1_000_000.0
+                            Log.d(LOG_TAG, "queueMs=$queueMs writeMs=$writeMs dropped=${mutableStatus.value.dropped}")
+                        }
+                    } finally {
+                        pool.offer(frame.samples)
                     }
                 }
             } finally {
@@ -283,7 +330,8 @@ class MicrophoneService : Service() {
         val stop = PendingIntent.getService(this, 1, Intent(this, MicrophoneService::class.java).setAction(STOP), PendingIntent.FLAG_IMMUTABLE)
         val mute = PendingIntent.getService(this, 2, Intent(this, MicrophoneService::class.java).setAction(MUTE), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_remote_monochrome)
-            .setContentTitle("Микрофон для ПК").setContentText(if (status.value.muted) "Без звука" else if (status.value.streaming) "Передача звука" else "Подключение…")
+            .setContentTitle("Микрофон для ПК")
+            .setContentText(if (status.value.muted) "Без звука" else if (status.value.streaming) "Передача звука" else "Подключение…")
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .addAction(Notification.Action.Builder(null, if (status.value.muted) "Включить звук" else "Без звука", mute).build())
             .addAction(Notification.Action.Builder(null, "Остановить", stop).build()).build()

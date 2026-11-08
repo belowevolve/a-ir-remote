@@ -20,10 +20,12 @@ fun KeyboardScreen(model: RemoteModel) {
     ) {
         CaptureDialogVolumeKeys()
         var editorView by remember { mutableStateOf<RemoteEditText?>(null) }
-        val submit = { editorView?.publishValue(); model.submitKeyboard() }
+        val submit: () -> Unit = { editorView?.afterInputBatch(model::submitKeyboard) }
         val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
         val hintColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
-        val inputType = model.keyboardInputType.takeIf { it != 0 } ?: android.text.InputType.TYPE_CLASS_TEXT
+        val originalInputType = model.keyboardInputType.takeIf { it != 0 } ?: android.text.InputType.TYPE_CLASS_TEXT
+        val inputType = if (originalInputType and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT)
+            originalInputType or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE else originalInputType
         val imeOptions = model.keyboardImeOptions.takeIf { (it and 0xff) != 0 } ?: EditorInfo.IME_ACTION_DONE
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = RemoteLayout.ScreenPadding, vertical = RemoteLayout.SmallGap)) {
@@ -32,6 +34,7 @@ fun KeyboardScreen(model: RemoteModel) {
                     factory = { context ->
                         RemoteEditText(context).apply {
                             editorView = this
+                            onDismissKeyboard = model::hideKeyboard
                             background = null
                             setPadding(0, 0, 0, 0)
                             gravity = Gravity.TOP or Gravity.START
@@ -39,8 +42,10 @@ fun KeyboardScreen(model: RemoteModel) {
                             hint = "Введите текст"
                             setTextColor(textColor)
                             setHintTextColor(hintColor)
-                            isSingleLine = true
+                            forceImeAction = true
                             this.inputType = inputType
+                            maxLines = Int.MAX_VALUE
+                            setHorizontallyScrolling(false)
                             this.imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
                             onValueChanged = model::editKeyboard
                             onBoundaryDelete = model::backspaceKeyboard
@@ -53,11 +58,17 @@ fun KeyboardScreen(model: RemoteModel) {
                     }
                 ) { editor ->
                     if (editor.inputType != inputType) editor.inputType = inputType
+                    editor.maxLines = Int.MAX_VALUE
+                    editor.setHorizontallyScrolling(false)
                     editor.imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
                     editor.applyValue(model.keyboardValue)
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = model::hideKeyboard) { Text("Отмена") }
+                    TextButton(onClick = model::hideKeyboard) { Text("Закрыть") }
+                    TextButton(onClick = { editorView?.let { editor -> editor.afterInputBatch {
+                        model.editKeyboard(androidx.compose.ui.text.input.TextFieldValue())
+                        editor.applyValue(model.keyboardValue)
+                    } } }) { Text("Очистить") }
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = submit) { Text("Ввод") }
                 }

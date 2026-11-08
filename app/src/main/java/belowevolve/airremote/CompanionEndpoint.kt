@@ -18,7 +18,7 @@ import org.json.JSONObject
 internal data class CompanionEndpoint(val host: String, val port: Int, val fingerprint: String, val token: String) {
     fun code() = "airremote://$host:$port/$fingerprint/$token"
 
-    fun open(network: Network, kind: String, onSocket: (SSLSocket) -> Unit = {}): SSLSocket {
+    fun open(network: Network, kind: String, watchTextFocus: Boolean = false, onSocket: (SSLSocket) -> Unit = {}): SSLSocket {
         val trust = object : X509TrustManager {
             override fun getAcceptedIssuers() = emptyArray<X509Certificate>()
             override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = error("Not a TLS server")
@@ -40,7 +40,7 @@ internal data class CompanionEndpoint(val host: String, val port: Int, val finge
             socket.soTimeout = 5000
             socket.connect(InetSocketAddress(lanAddress(host), port), 3000)
             socket.startHandshake()
-            val hello = JSONObject().put("token", token).put("kind", kind).toString() + "\n"
+            val hello = JSONObject().put("token", token).put("kind", kind).put("watch_text_focus", watchTextFocus).toString() + "\n"
             socket.outputStream.write(hello.toByteArray(Charsets.UTF_8))
             socket.outputStream.flush()
             val reply = readLine(socket.inputStream)
@@ -66,9 +66,9 @@ internal data class CompanionEndpoint(val host: String, val port: Int, val finge
                 if (endpoint == null) remove("endpoint") else putString("endpoint", endpoint.code())
             }
         }
-        fun readLine(input: InputStream): String {
+        fun readLine(input: InputStream, maxBytes: Int = 4096): String {
             val result = java.io.ByteArrayOutputStream()
-            while (result.size() < 4096) {
+            while (result.size() < maxBytes) {
                 val next = input.read()
                 if (next < 0) throw java.io.EOFException("ПК закрыл соединение")
                 if (next == 10) return result.toString(Charsets.UTF_8.name())

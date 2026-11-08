@@ -6,6 +6,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,7 +25,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun PcPointerSurface(model: PcRemoteModel, trackpadVisible: Boolean, content: @Composable (Modifier) -> Unit) {
+internal fun PcPointerSurface(model: PcRemoteModel, trackpadVisible: Boolean, onConnect: () -> Unit = {}, content: @Composable (Modifier) -> Unit) {
+    val connect by rememberUpdatedState(onConnect)
     var trackpadBounds by remember { mutableStateOf(Rect.Zero) }
     var origin by remember { mutableStateOf(Offset.Zero) }
     val scope = rememberCoroutineScope()
@@ -36,10 +38,17 @@ internal fun PcPointerSurface(model: PcRemoteModel, trackpadVisible: Boolean, co
     Box(
         modifier = Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }
             .pointerInput(model.connected, trackpadVisible) {
-                if (!model.connected) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     val onTrackpad = trackpadVisible && trackpadBounds.contains(down.position + origin)
+                    if (!model.connected) {
+                        if (onTrackpad) {
+                            down.consume()
+                            val up = waitForUpOrCancellation(PointerEventPass.Initial)
+                            if (up != null) { up.consume(); connect() }
+                        }
+                        return@awaitEachGesture
+                    }
                     val continuingDrag = model.dragging
                     var captured = onTrackpad || continuingDrag
                     if (captured) down.consume()

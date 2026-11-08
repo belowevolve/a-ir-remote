@@ -19,21 +19,28 @@ private const val TV_TAG = "AirRemoteTv"
 
 class TvClient(private val identity: TvIdentity) {
     @Volatile private var socket: SSLSocket? = null
-    private var pairingSocket: SSLSocket? = null
+    @Volatile private var pairingSocket: SSLSocket? = null
     private var pairingHost = ""
     private var features = 0
     private val voice = TvVoiceSession()
     private val power = TvPowerSession()
+    private val keyStartup = TvKeyStartupGate()
     private val writeLock = Any()
     private val connectionLock = Any()
     private val connectingSockets = mutableSetOf<SSLSocket>()
     private val remotePorts = TvConnectionPorts()
     private var connectionVersion = 0L
+    private var pairingVersion = 0L
     private val keyboard = TvKeyboard()
     
-    private fun open(host: String, port: Int, pairing: Boolean, version: Long? = null): SSLSocket {
+    private fun open(host: String, port: Int, pairing: Boolean, version: Long? = null, pairVersion: Long? = null): SSLSocket {
         val s = identity.context(host, pairing).socketFactory.createSocket() as SSLSocket
         return try {
+            if (pairVersion != null) synchronized(connectionLock) {
+                if (pairVersion != pairingVersion) throw CancellationException("Сопряжение отменено")
+                pairingSocket = s
+                pairingHost = host
+            }
             if (version != null) synchronized(connectionLock) {
                 if (version != connectionVersion) throw CancellationException("Соединение отменено")
                 connectingSockets.add(s)
@@ -58,9 +65,8 @@ class TvClient(private val identity: TvIdentity) {
     }
     
     fun beginPairing(host: String) {
-        cancelPairing()
-        val s = open(host, 6467, pairing = true)
-        pairingSocket = s; pairingHost = host
+        val version = resetPairing()
+        val s = open(host, 6467, pairing = true, pairVersion = version)
         try {
             check(exchange(s, pairMessage().setPairingRequest(PairingRequest.newBuilder().setServiceName("air_remote").setClientName("Air Remote")).build()).hasPairingRequestAck())
             val enc = Options.Encoding.newBuilder().setType(Options.Encoding.EncodingType.ENCODING_TYPE_HEXADECIMAL).setSymbolLength(6)
@@ -89,7 +95,18 @@ class TvClient(private val identity: TvIdentity) {
         cancelPairing()
     }
     
-    fun cancelPairing() { pairingSocket?.close(); pairingSocket = null }
+    fun cancelPairing() {
+        resetPairing()
+    }
+
+    private fun resetPairing(): Long {
+        val (version, closing) = synchronized(connectionLock) {
+            pairingVersion++
+            pairingVersion to pairingSocket.also { pairingSocket = null }
+        }
+        runCatching { closing?.close() }
+        return version
+    }
     
     fun close() {
         val closing = synchronized(connectionLock) {
@@ -98,6 +115,7 @@ class TvClient(private val identity: TvIdentity) {
             (connectingSockets.toList() + listOfNotNull(socket)).also {
                 connectingSockets.clear()
                 socket = null
+                keyStartup.close()
             }
         }
         Dispatchers.IO.dispatch(EmptyCoroutineContext) { closing.forEach { runCatching { it.close() } } }
@@ -121,12 +139,13 @@ class TvClient(private val identity: TvIdentity) {
         val s = open(host, port, pairing = false, version = version)
         if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Connected port=$port")
         try {
-            synchronized(connectionLock) {
-                if (version != connectionVersion) throw CancellationException("Соединение отменено")
-                socket = s
-            }
             synchronized(writeLock) {
-                if (socket !== s) throw CancellationException("Соединение отменено")
+                synchronized(connectionLock) {
+                    if (version != connectionVersion) throw CancellationException("Соединение отменено")
+                    socket = s
+                    keyStartup.open(s)
+                }
+                features = 0
                 power.reset()
                 keyboard.reset()
                 voice.reset()
@@ -134,7 +153,7 @@ class TvClient(private val identity: TvIdentity) {
                 onKeyboard(keyboard.snapshot())
             }
             val input = s.inputStream.buffered()
-            while (!s.isClosed) {
+            while (true) {
                 val msg = RemoteMessage.parseDelimitedFrom(input) ?: throw EOFException("Соединение с ТВ закрыто")
                 if (Log.isLoggable(IME_TAG, Log.DEBUG)) {
                     if (msg.hasRemoteImeKeyInject()) {
@@ -148,52 +167,51 @@ class TvClient(private val identity: TvIdentity) {
 
                 }
                 synchronized(writeLock) {
-                    if (socket === s) {
-                        keyboard.receive(msg)?.let(onKeyboard)
-                    }
-                }
-                when {
-                    msg.hasRemoteConfigure() -> {
-                        features = msg.remoteConfigure.code1 and (1 or 2 or 4 or 8 or 16 or 32 or 64 or 512)
-                        send(
-                            RemoteMessage.newBuilder().setRemoteConfigure(
-                                RemoteConfigure.newBuilder().setCode1(features).setDeviceInfo(
-                                    RemoteDeviceInfo.newBuilder().setUnknown1(1).setUnknown2("1").setPackageName(BuildConfig.APPLICATION_ID).setAppVersion(BuildConfig.VERSION_NAME),
-                                ),
-                            ).build(),
-                        )
-                    }
-                    msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
-                    msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
-                    msg.hasRemoteStart() -> {
-                        val current = synchronized(writeLock) {
-                            if (socket !== s) false else {
-                                if ((features and 32) != 0) power.update(msg.remoteStart.started)
-                                true
-                            }
+                    // close() can leave buffered messages in the previous reader.
+                    // None may change the new session or send replies on its socket.
+                    if (socket !== s) throw EOFException("Соединение с ТВ изменилось")
+                    keyboard.receive(msg)?.let(onKeyboard)
+                    when {
+                        msg.hasRemoteConfigure() -> {
+                            features = msg.remoteConfigure.code1 and (1 or 2 or 4 or 8 or 16 or 32 or 64 or 512)
+                            send(
+                                RemoteMessage.newBuilder().setRemoteConfigure(
+                                    RemoteConfigure.newBuilder().setCode1(features).setDeviceInfo(
+                                        RemoteDeviceInfo.newBuilder().setUnknown1(1).setUnknown2("1").setPackageName(BuildConfig.APPLICATION_ID).setAppVersion(BuildConfig.VERSION_NAME),
+                                    ),
+                                ).build(),
+                            )
                         }
-                        if (!current) continue
-                        if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power port=$port on=${msg.remoteStart.started}")
-                        // The vendor wake endpoint can remain silent while healthy.
-                        // The normal control endpoint sends heartbeats, so retain
-                        // its deadline to detect a stalled network connection.
-                        s.soTimeout = if (port == 6465) 0 else 65000
-                        ready(msg.remoteStart.started)
-                    }
-                    msg.hasRemoteVoiceBegin() -> synchronized(writeLock) {
-                        if (socket === s) {
+                        msg.hasRemoteSetActive() -> send(RemoteMessage.newBuilder().setRemoteSetActive(RemoteSetActive.newBuilder().setActive(features)).build())
+                        msg.hasRemotePingRequest() -> send(RemoteMessage.newBuilder().setRemotePingResponse(RemotePingResponse.newBuilder().setVal1(msg.remotePingRequest.val1)).build())
+                        msg.hasRemoteStart() -> {
+                            keyStartup.ready(s)
+                            if ((features and 32) != 0) power.update(msg.remoteStart.started)
+                            if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power port=$port on=${msg.remoteStart.started}")
+                            // The vendor wake endpoint can remain silent while healthy.
+                            // The normal control endpoint sends heartbeats, so retain
+                            // its deadline to detect a stalled network connection.
+                            s.soTimeout = if (port == 6465) 0 else 65000
+                            ready(msg.remoteStart.started)
+                        }
+                        msg.hasRemoteVoiceBegin() -> {
                             voice.request(msg.remoteVoiceBegin.sessionId)
                             onVoiceRequest(voice.requested != null)
                         }
-                    }
-                    msg.hasRemoteVoiceSessionEnd() || msg.hasRemoteVoiceEnd() -> synchronized(writeLock) {
-                        val id = if (msg.hasRemoteVoiceSessionEnd()) msg.remoteVoiceSessionEnd.sessionId else msg.remoteVoiceEnd.sessionId
-                        if (socket === s && voice.end(id)) onVoiceRequest(false)
+                        msg.hasRemoteVoiceSessionEnd() || msg.hasRemoteVoiceEnd() -> {
+                            val id = if (msg.hasRemoteVoiceSessionEnd()) msg.remoteVoiceSessionEnd.sessionId else msg.remoteVoiceEnd.sessionId
+                            if (voice.end(id)) onVoiceRequest(false)
+                        }
                     }
                 }
             }
         } finally {
-            synchronized(connectionLock) { if (socket === s) socket = null }
+            synchronized(connectionLock) {
+                if (socket === s) {
+                    socket = null
+                    keyStartup.close()
+                }
+            }
             s.close()
         }
     }
@@ -230,11 +248,15 @@ class TvClient(private val identity: TvIdentity) {
 
     fun externalWakeFailed(pending: CompletableDeferred<Unit>?, error: Exception) = power.failed(pending, error)
 
-    fun sendKey(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) = synchronized(writeLock) {
-        if (code == 26 && Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power key port=${socket?.port} direction=$direction")
-        send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
-        if ((code == 26 || code == 177) && direction == RemoteDirection.SHORT) power.explicitWakeSent()
-        Unit
+    fun sendKey(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) {
+        val expected = synchronized(writeLock) { socket ?: error("Нет соединения с ТВ") }
+        keyStartup.awaitReady(expected)
+        synchronized(writeLock) {
+            if (socket !== expected) throw EOFException("Соединение с ТВ изменилось")
+            if (code == 26 && Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power key port=${expected.port} direction=$direction")
+            send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
+            power.keySent(code, direction)
+        }
     }
     
     fun launchAppLink(link: String) {

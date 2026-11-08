@@ -69,8 +69,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         model.onMicrophonePermissionNeeded = null
-        model.pause()
-        pcModel.pause()
+        if (!isChangingConfigurations) {
+            model.pause()
+            pcModel.pause()
+        }
         super.onStop()
     }
 }

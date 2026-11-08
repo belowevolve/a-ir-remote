@@ -7,6 +7,36 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class PcHidOutputTest {
+    @Test fun releaseCompletionRunsAfterAllReportsAndDropsPendingCommands() {
+        val entered = CountDownLatch(1)
+        val unblock = CountDownLatch(1)
+        val done = CountDownLatch(1)
+        val reports = Collections.synchronizedList(mutableListOf<Pair<Int, ByteArray>>())
+        var atCompletion: List<Pair<Int, ByteArray>> = emptyList()
+        val output = PcHidOutput { id, data ->
+            if (id == PcHidReports.KEYBOARD && data[2].toInt() == 4) {
+                entered.countDown()
+                unblock.await(2, TimeUnit.SECONDS)
+            }
+            reports.add(id to data)
+        }
+        try {
+            output.key(4, 1)
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            output.key(5, 0)
+            output.release {
+                atCompletion = synchronized(reports) { reports.toList() }
+                done.countDown()
+            }
+            assertFalse(done.await(20, TimeUnit.MILLISECONDS))
+            unblock.countDown()
+            assertTrue(done.await(2, TimeUnit.SECONDS))
+            assertEquals(listOf(PcHidReports.KEYBOARD, PcHidReports.MOUSE, PcHidReports.CONSUMER), atCompletion.takeLast(3).map { it.first })
+            assertTrue(atCompletion.takeLast(3).all { it.second.all { byte -> byte == 0.toByte() } })
+            assertFalse(atCompletion.any { (id, data) -> id == PcHidReports.KEYBOARD && data[2].toInt() == 5 })
+        } finally { unblock.countDown(); output.close() }
+    }
+
     @Test fun rapidVolumeCommandsEachHaveTheirOwnRelease() {
         val reports = Collections.synchronizedList(mutableListOf<ByteArray>())
         val sent = CountDownLatch(6)

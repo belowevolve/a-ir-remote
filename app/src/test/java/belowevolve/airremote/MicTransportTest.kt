@@ -52,6 +52,35 @@ class MicTransportTest {
         }
     }
 
+    @Test fun reusableEncoderKeepsWireFormatAndReplacesEverySample() {
+        for (floatPcm in listOf(true, false)) {
+            val encoder = MicTransport.Encoder(floatPcm)
+            val loud = encoder.encode(FloatArray(480) { 0.75f }, false)
+            val first = loud.copyOf()
+            val silent = encoder.encode(FloatArray(480) { -1f }, true)
+            assertSame(loud, silent)
+            val silentPacket = MicrophoneProtocol.AudioPacket.parseFrom(silent.copyOfRange(4, silent.size))
+            assertEquals(silent.size - 4, ByteBuffer.wrap(silent).int)
+            assertEquals(48_000, silentPacket.sampleRate)
+            assertEquals(1, silentPacket.channelCount)
+            assertEquals(if (floatPcm) 4 else 2, silentPacket.audioFormat)
+            assertEquals(480 * if (floatPcm) 4 else 2, silentPacket.buffer.size())
+            assertTrue(silentPacket.buffer.toByteArray().all { it == 0.toByte() })
+            val firstPacket = MicrophoneProtocol.AudioPacket.parseFrom(first.copyOfRange(4, first.size))
+            assertTrue(firstPacket.buffer.toByteArray().any { it != 0.toByte() })
+        }
+    }
+
+    @Test fun encoderClampsSamplesAndSilencesNonFiniteInput() {
+        val bytes = MicTransport.frame(floatArrayOf(-2f, 2f, Float.NaN, Float.POSITIVE_INFINITY), 4, false, true)
+        val packet = MicrophoneProtocol.AudioPacket.parseFrom(bytes.copyOfRange(4, bytes.size))
+        val pcm = ByteBuffer.wrap(packet.buffer.toByteArray()).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(-1f, pcm.float, 0f)
+        assertEquals(1f, pcm.float, 0f)
+        assertEquals(0f, pcm.float, 0f)
+        assertEquals(0f, pcm.float, 0f)
+    }
+
     @Test fun tcpReceiverDecodesConsecutiveFramesAndPcm16() {
         val executor = Executors.newSingleThreadExecutor()
         ServerSocket(0).use { server ->
