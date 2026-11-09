@@ -260,17 +260,34 @@ class HomeActivity : QuietActivity() {
   override fun onResume() {
     super.onResume()
     Ui.fullscreen(this)
-    theme = WallpaperTheme.load(this)
+    val restoredTheme = WallpaperTheme.load(this)
+    // Returning from a dream must not replace an unchanged palette and invalidate the UI.
+    if (
+      restoredTheme?.imageKey != theme?.imageKey ||
+        restoredTheme?.seed != theme?.seed ||
+        restoredTheme?.colors?.contentEquals(theme?.colors) != true
+    )
+      theme = restoredTheme
     val nextStyle = getSharedPreferences("appearance", 0).all.toString()
     if (nextStyle != appearanceKey) {
       appearanceKey = nextStyle
       appearance++
     }
     WakeTrace.record(this, "home_resume")
-    if (Build.VERSION.SDK_INT >= 29)
+    if (Build.VERSION.SDK_INT >= 29) {
+      val resumedAt = SystemClock.uptimeMillis()
+      val cachedWallpaper = background != null
+      val cachedPosters = posters.count { it.bitmap != null }
       window.decorView.viewTreeObserver.registerFrameCommitCallback {
         WakeTrace.record(this, "home_frame")
+        android.util.Log.i(
+          "AirHome",
+          "RESUME_FRAME_MS=${SystemClock.uptimeMillis() - resumedAt} cached_wallpaper=$cachedWallpaper cached_posters=$cachedPosters",
+        )
       }
+      // Warm any GPU textures released while hidden, before the first navigation key.
+      window.decorView.postInvalidateOnAnimation()
+    }
     updateVpn()
     main.removeCallbacks(tick)
     tick.run()
