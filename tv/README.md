@@ -25,6 +25,8 @@ Release использует стандартный Android debug-ключ. Дл
 ./gradlew :tv:installRelease
 ```
 
+Если подключено несколько устройств, выберите телевизор через переменную `ANDROID_SERIAL`.
+
 Проверки на устройстве находятся в `src/androidTest/`; они запускаются отдельно через `LauncherRegressionRunner`.
 
 [Основной README](../README.md).
