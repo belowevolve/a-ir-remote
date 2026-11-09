@@ -25,7 +25,6 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.PlatformTextStyle
@@ -33,6 +32,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import belowevolve.shared.compose.AirButton
 import belowevolve.shared.design.PosterBadgeSpec
@@ -555,7 +555,6 @@ internal fun HomeContent(
       } else settings.requestFocus()
     }
   }
-  val windowPixels = LocalWindowInfo.current.containerSize
   Box(
     modifier
       .fillMaxSize()
@@ -565,20 +564,20 @@ internal fun HomeContent(
       )
   ) {
     if (wallpaper != null && !wallpaper.isRecycled)
-      Image(
-        remember(wallpaper) { wallpaper.asImageBitmap() },
-        null,
-        Modifier.fillMaxSize(),
-        contentScale = ContentScale.Crop,
-        filterQuality =
-          if (
-            !preview &&
-              wallpaper.width == windowPixels.width &&
-              wallpaper.height == windowPixels.height
-          )
-            FilterQuality.None
-          else FilterQuality.Low,
-      )
+      if (preview)
+        Image(
+          remember(wallpaper) { wallpaper.asImageBitmap() },
+          null,
+          Modifier.fillMaxSize(),
+          contentScale = ContentScale.Crop,
+          filterQuality = FilterQuality.Low,
+        )
+      else
+        AndroidView(
+          factory = { WallpaperSurface(it) },
+          update = { it.show(wallpaper) },
+          modifier = Modifier.fillMaxSize(),
+        )
     Row(
       Modifier.align(Alignment.TopEnd)
         .zIndex(1f)
