@@ -18,6 +18,7 @@ import androidx.compose.ui.focus.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
@@ -200,10 +201,21 @@ internal fun rememberTvRowFocusSpec(
 }
 
 @Composable
-internal fun PosterBadgesContent(image: String, modifier: Modifier = Modifier, inset: Float = 6f) {
+internal fun PosterBadgesContent(
+  image: String,
+  modifier: Modifier = Modifier,
+  inset: Float = 6f,
+  format: Int = PosterBadgeSpec.CIRCLE,
+  showEpisode: Boolean = true,
+  showNews: Boolean = true,
+) {
   val metadata = remember(image) { PosterBadges.metadata(image) } ?: return
-  val episode = PosterBadgeSpec.episode(metadata.optString("season"), metadata.optString("mark"))
+  val season = metadata.optString("season")
+  val mark = metadata.optString("mark")
+  val episode = remember(season, mark, format) { PosterBadgeSpec.format(season, mark, format) }
+  val circle = remember(season, mark, format) { PosterBadgeSpec.circleSeason(season, mark, format) }
   val news = metadata.optString("news")
+  val lineHeight = with(LocalDensity.current) { PosterBadgeSpec.LINE_SP.sp.toDp() }
   val badgeStyle =
     TextStyle(
       fontSize = PosterBadgeSpec.TEXT_SP.sp,
@@ -213,23 +225,53 @@ internal fun PosterBadgesContent(image: String, modifier: Modifier = Modifier, i
       platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
   @Composable
-  fun chip(text: String) {
-    Text(
-      text,
-      Modifier.background(
+  fun chip(text: String, season: String = "") {
+    Row(
+      Modifier.height(lineHeight + (2 * PosterBadgeSpec.PADDING_Y_DP).dp)
+        .background(
           MaterialTheme.colorScheme.primaryContainer,
           RoundedCornerShape(PosterBadgeSpec.CORNER_DP.dp),
         )
         .padding(PosterBadgeSpec.PADDING_X_DP.dp, PosterBadgeSpec.PADDING_Y_DP.dp),
-      color = MaterialTheme.colorScheme.onPrimaryContainer,
-      style = badgeStyle,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-    )
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      if (season.isNotEmpty()) {
+        Box(
+          Modifier.size(lineHeight)
+            .border(
+              1.dp,
+              MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .65f),
+              CircleShape,
+            ),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            season,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            style =
+              badgeStyle.copy(
+                fontSize = (10 - season.length).coerceAtLeast(5).sp,
+                letterSpacing = 0.sp,
+              ),
+            maxLines = 1,
+            softWrap = false,
+          )
+        }
+        Spacer(Modifier.width(4.dp))
+      }
+      Text(
+        text,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+        style = badgeStyle,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
   }
   Box(modifier.padding(inset.dp)) {
-    if (episode.isNotEmpty()) Box(Modifier.align(Alignment.TopStart)) { chip(episode) }
-    if (news.isNotEmpty()) Box(Modifier.align(Alignment.BottomEnd)) { chip(news) }
+    if (showEpisode && episode.isNotEmpty())
+      Box(Modifier.align(Alignment.TopStart)) { chip(episode, circle) }
+    if (showNews && news.isNotEmpty()) Box(Modifier.align(Alignment.BottomEnd)) { chip(news) }
   }
 }
 
@@ -348,8 +390,15 @@ internal fun PosterCard(
             Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
           )
-        if (art.clean && layout.showBadges)
-          PosterBadgesContent(art.program.image, Modifier.fillMaxSize(), layout.badgeInset)
+        if (art.clean && (layout.showEpisodeBadges || layout.showNewsBadges))
+          PosterBadgesContent(
+            art.program.image,
+            Modifier.fillMaxSize(),
+            layout.badgeInset,
+            layout.badgeFormat,
+            layout.showEpisodeBadges,
+            layout.showNewsBadges,
+          )
       }
     }
   }
@@ -562,13 +611,18 @@ internal fun HomeContent(
     }
     val art = posters.getOrNull(selected)
     if (layout.showTitle && art != null) {
-      val top =
-        if (layout.mode == 0) layout.posterTop + layout.posterHeight + 24
-        else layout.posterTop - if (layout.captionStyle == 1) 80 else 52
+      val anchor =
+        if (layout.mode == 0) layout.posterTop + layout.posterHeight else layout.posterTop
       HomeCaption(
         Caption(art.program.title, SelectionCaption.description(art.program.image)),
         layout,
-        Modifier.offset(x = 32.dp, y = top.dp).width(896.dp),
+        Modifier.offset(x = 32.dp, y = anchor.dp).width(896.dp).layout { measurable, constraints ->
+          val caption = measurable.measure(constraints)
+          val gap = layout.captionGap.dp.roundToPx()
+          layout(caption.width, caption.height) {
+            caption.place(0, if (layout.mode == 0) gap else -caption.height - gap)
+          }
+        },
       )
     }
   }

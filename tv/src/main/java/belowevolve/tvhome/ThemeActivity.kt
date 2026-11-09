@@ -123,10 +123,27 @@ class ThemeActivity : QuietActivity() {
             TvAction(
               "Бейджи на главной",
               Modifier.fillMaxWidth(),
-              trailingText = if (layout.showBadges) "Показывать" else "Скрывать",
+              trailingText = HomeLayout.BADGE_VISIBILITY[layout.badgeVisibility],
             ) {
-              flag("poster_badges", !layout.showBadges)
+              set(
+                "poster_badges_mode",
+                (layout.badgeVisibility + 1) % HomeLayout.BADGE_VISIBILITY.size,
+              )
             }
+            if (layout.showEpisodeBadges)
+              TvAction(
+                "Формат бейджа",
+                Modifier.fillMaxWidth(),
+                trailingText =
+                  belowevolve.shared.design.PosterBadgeSpec.FORMATS[layout.badgeFormat],
+              ) {
+                set(
+                  "poster_badge_format",
+                  (layout.badgeFormat + 1) % belowevolve.shared.design.PosterBadgeSpec.FORMATS.size,
+                )
+              }
+            if (layout.showTitle)
+              ThemeSlider("Отступ заголовка", "caption_gap", layout.captionGap, 8, 40, 4, ::set)
             TvAction(
               "Анимация заголовка",
               Modifier.fillMaxWidth(),

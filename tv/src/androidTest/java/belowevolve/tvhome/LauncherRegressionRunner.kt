@@ -70,6 +70,7 @@ class LauncherRegressionRunner : Instrumentation() {
       checkPosters(context)
       checkArtworkSources(context)
       checkViews(context)
+      checkBadgeSettings(context)
       checkWallpaperPreview(context)
       checkPreparedWallpaper(context)
       ColorKeyActionsRegression.run()
@@ -244,6 +245,47 @@ class LauncherRegressionRunner : Instrumentation() {
       SelectionCaption.description(null).isEmpty(),
       "Missing caption metadata must stay optional",
     )
+    val metadata =
+      org.json
+        .JSONObject()
+        .put("v", 1)
+        .put("poster", "https://example.invalid/poster.jpg")
+        .put("season", "Сезон 07")
+        .put("mark", "Серия 07")
+    val image =
+      Uri.parse("content://mov.film.tvart/clean")
+        .buildUpon()
+        .appendQueryParameter("airhome_badges", metadata.toString())
+        .build()
+        .toString()
+    check(SelectionCaption.description(image) == "7 сезон · 7 серия", "Caption order changed")
+  }
+
+  private fun checkBadgeSettings(context: Context) {
+    val name = "badge-regression"
+    val preferences = context.getSharedPreferences(name, 0)
+    val isolated =
+      object : ContextWrapper(context) {
+        override fun getSharedPreferences(name: String, mode: Int) = preferences
+      }
+    try {
+      preferences.edit().clear().putBoolean("poster_badges", false).commit()
+      check(!HomeLayout(isolated).showNewsBadges, "Hidden badges reappeared after upgrade")
+      preferences.edit().putInt("poster_badges_mode", 1).commit()
+      val news = HomeLayout(isolated)
+      check(
+        !news.showEpisodeBadges && news.showNewsBadges,
+        "News-only mode still shows episode badges",
+      )
+      preferences.edit().putInt("poster_badges_mode", 0).commit()
+      val all = HomeLayout(isolated)
+      check(all.showEpisodeBadges && all.showNewsBadges, "All-badges mode lost a badge")
+      check(all.captionGap == 24, "Default caption spacing changed")
+      preferences.edit().putInt("caption_gap", 32).commit()
+      check(HomeLayout(isolated).captionGap == 32, "Caption spacing was not saved")
+    } finally {
+      context.deleteSharedPreferences(name)
+    }
   }
 
   private fun checkArtworkSources(context: Context) {

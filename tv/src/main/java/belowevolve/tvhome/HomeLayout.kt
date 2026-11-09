@@ -19,7 +19,11 @@ class HomeLayout(c: Context) {
   val glow: Int
   val shadow: Int
   val showTitle: Boolean
-  val showBadges: Boolean
+  val showEpisodeBadges: Boolean
+  val badgeVisibility: Int
+  val badgeFormat: Int
+  val showNewsBadges: Boolean
+  val captionGap: Int
   val animateTitle: Boolean
   val cornerRadius: Float
   val badgeInset: Float
@@ -33,7 +37,17 @@ class HomeLayout(c: Context) {
     posterHeight = (posterWidth * 1.5f).roundToInt()
     cornerRadius = posterCorner(posterWidth)
     badgeInset = posterBadgeInset(posterWidth)
-    showBadges = p.getBoolean("poster_badges", true)
+    badgeVisibility =
+      clamp(p.getInt("poster_badges_mode", if (p.getBoolean("poster_badges", true)) 0 else 2), 0, 2)
+    showEpisodeBadges = badgeVisibility == 0
+    showNewsBadges = badgeVisibility != 2
+    badgeFormat =
+      clamp(
+        p.getInt("poster_badge_format", 0),
+        0,
+        belowevolve.shared.design.PosterBadgeSpec.FORMATS.lastIndex,
+      )
+    captionGap = clamp(p.getInt("caption_gap", 24), 8, 40)
     animateTitle = p.getBoolean("animate_title", true)
     glow = clamp(p.getInt("poster_glow", 100), 0, 100)
     shadow = clamp(p.getInt("poster_shadow", 0), 0, PosterShadow.NAMES.lastIndex)
@@ -67,6 +81,7 @@ class HomeLayout(c: Context) {
     const val MaxPosterWidth = 162
     const val MaxPosterHeight = MaxPosterWidth * 3 / 2
     val SIZES = arrayOf("Компактные", "Средние", "Крупные")
+    val BADGE_VISIBILITY = arrayOf("Все", "Только новые", "Скрывать")
     val NAMES: Array<String> = arrayOf<String>("Лента по центру", "Нижняя полка")
     val CAPTION_IDS: IntArray = intArrayOf(0, 1, 4, 3)
     val CAPTIONS: Array<String> =
