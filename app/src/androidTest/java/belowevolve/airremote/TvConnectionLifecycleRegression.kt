@@ -55,6 +55,10 @@ internal fun Instrumentation.checkTvConnectionLifecycle() {
                 model.set(ViewModelProvider(store, ViewModelProvider.AndroidViewModelFactory.getInstance(
                     targetContext.applicationContext as Application,
                 ))[RemoteModel::class.java])
+                check(model.get().hasSelectedTv) { "Saved TV disappeared before the handshake" }
+                model.get().showDeviceDialog()
+                check(model.get().deviceDialog == TvDeviceDialogState.SETTINGS)
+                model.get().dismissDeviceDialog()
                 model.get().resume()
             }
             val first = tv.awaitSession()
@@ -114,7 +118,8 @@ internal fun Instrumentation.checkTvConnectionLifecycle() {
                 check(!remote.requireConnection())
                 check(remote.deviceDialog == TvDeviceDialogState.CLOSED) { "Reconnect opened the device picker" }
                 remote.showDeviceDialog()
-                check(remote.deviceDialog == TvDeviceDialogState.DEVICES) { "Explicit device picker stopped working" }
+                check(remote.hasSelectedTv) { "Reconnect forgot the paired TV" }
+                check(remote.deviceDialog == TvDeviceDialogState.SETTINGS) { "Reconnect replaced device settings with a picker" }
                 remote.dismissDeviceDialog()
             }
             tv.ready(second)
@@ -148,7 +153,7 @@ internal fun Instrumentation.checkTvConnectionLifecycle() {
             main {
                 check(!model.get().connected)
                 model.get().key(19)
-                check(model.get().deviceDialog == TvDeviceDialogState.DEVICES) { "Offline setup stopped working" }
+                check(model.get().deviceDialog == TvDeviceDialogState.SETTINGS) { "Offline paired TV lost its settings" }
             }
         }
     } finally {

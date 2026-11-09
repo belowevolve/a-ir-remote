@@ -48,7 +48,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     internal fun showDeviceDialog() {
         if (!busy && !pairing)
-            deviceDialog = if (connected) TvDeviceDialogState.SETTINGS else TvDeviceDialogState.DEVICES
+            deviceDialog = if (hasSelectedTv) TvDeviceDialogState.SETTINGS else TvDeviceDialogState.DEVICES
     }
 
     internal fun dismissDeviceDialog() {
@@ -91,6 +91,12 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         private set
     var hasPairedTv by mutableStateOf(host.isNotBlank() && app.getSharedPreferences("tv_identity", Context.MODE_PRIVATE).contains(host))
         private set
+    // The selected, paired device survives standby and transport reconnection.
+    val hasSelectedTv: Boolean get() = hasPairedTv && host.isNotBlank()
+
+    internal fun dump(out: java.io.PrintWriter) {
+        out.println("AirRemote TV paired=$hasSelectedTv connected=$connected connecting=$connecting foreground=$foreground sessionJob=${connectionJob?.isActive == true}")
+    }
     private val powerSignal: Pair<Int, IntArray>?
         get() {
             val custom = prefs.getString("ir", null)?.takeIf {

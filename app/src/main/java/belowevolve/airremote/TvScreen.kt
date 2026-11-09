@@ -91,11 +91,11 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
             ) {
                 AppHeader(
-                    title = if (model.connected) model.tvName else "Подключить ТВ",
+                    title = if (model.hasSelectedTv) model.tvName else "Подключить ТВ",
                     actionIcon =
-                        if (model.connected) ImageVector.vectorResource(RemoteIcons.Tune)
+                        if (model.hasSelectedTv) ImageVector.vectorResource(RemoteIcons.Tune)
                         else Icons.Rounded.Devices,
-                    actionDescription = if (model.connected) "Настройки ТВ" else "Подключить ТВ",
+                    actionDescription = if (model.hasSelectedTv) "Настройки ТВ" else "Подключить ТВ",
                 ) {
                     model.showDeviceDialog()
                 }
@@ -265,7 +265,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 if (screen == TvDeviceDialogState.SETTINGS) {
                     DialogActionGroup {
                         DialogToggleRow("Автоклавиатура", model.autoKeyboard, model::updateAutoKeyboard)
-                        if (!model.connected && model.connectionNeedsAttention)
+                        if (!model.connected)
                             DialogActionRow("Подключиться", loading = model.connecting) { model.connect() }
                         DialogActionRow("Входы / HDMI", enabled = model.connected) {
                             model.key(android.view.KeyEvent.KEYCODE_TV_INPUT)

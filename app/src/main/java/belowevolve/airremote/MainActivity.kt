@@ -75,4 +75,14 @@ class MainActivity : ComponentActivity() {
         }
         super.onStop()
     }
+
+    override fun dump(
+        prefix: String,
+        fd: java.io.FileDescriptor?,
+        out: java.io.PrintWriter,
+        args: Array<out String>?,
+    ) {
+        super.dump(prefix, fd, out, args)
+        model.dump(out)
+    }
 }
