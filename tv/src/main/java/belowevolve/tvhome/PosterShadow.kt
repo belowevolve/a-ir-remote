@@ -52,12 +52,12 @@ internal object PosterShadow {
               0 -> {
                 paint.alpha = 45
                 paint.maskFilter = BlurMaskFilter(6f, BlurMaskFilter.Blur.NORMAL)
-                canvas.drawRoundRect(rect, 12f, 12f, paint)
+                canvas.drawRoundRect(rect, HomeLayout.CornerRadius, HomeLayout.CornerRadius, paint)
                 paint.alpha = 220
                 paint.maskFilter =
                   BlurMaskFilter(if (wide) 16f else 10f, BlurMaskFilter.Blur.NORMAL)
                 rect.offset(0f, 9f)
-                canvas.drawRoundRect(rect, 12f, 12f, paint)
+                canvas.drawRoundRect(rect, HomeLayout.CornerRadius, HomeLayout.CornerRadius, paint)
               }
               1 -> {
                 paint.maskFilter = BlurMaskFilter(if (wide) 14f else 9f, BlurMaskFilter.Blur.NORMAL)
@@ -69,7 +69,7 @@ internal object PosterShadow {
               else -> {
                 paint.maskFilter =
                   BlurMaskFilter(if (wide) 18f else 12f, BlurMaskFilter.Blur.NORMAL)
-                canvas.drawRoundRect(rect, 12f, 12f, paint)
+                canvas.drawRoundRect(rect, HomeLayout.CornerRadius, HomeLayout.CornerRadius, paint)
               }
             }
             outlines[index] = bitmap

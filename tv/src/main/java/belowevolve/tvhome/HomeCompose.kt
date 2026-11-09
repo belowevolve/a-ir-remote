@@ -21,6 +21,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.PlatformTextStyle
@@ -28,7 +29,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
-import androidx.compose.ui.viewinterop.AndroidView
 import belowevolve.shared.compose.AirButton
 import belowevolve.shared.design.PosterBadgeSpec
 import belowevolve.shared.design.RemoteIcons
@@ -43,8 +43,12 @@ internal data class PosterArt(
 )
 
 /** Worker-only: prepare the first focused frame's artwork and coloured glow. */
-internal fun preparePosterArt(program: ProgramRepository.Program, store: PosterStore): PosterArt {
-  val art = store.loadCard(program.image)
+internal fun preparePosterArt(
+  program: ProgramRepository.Program,
+  store: PosterStore,
+  cachedOnly: Boolean = false,
+): PosterArt {
+  val art = if (cachedOnly) store.loadCachedCard(program.image) else store.loadCard(program.image)
   val accent = Ui.posterAccent(art.bitmap)
   if (art.bitmap != null) PosterShadow.load(accent, false)
   return PosterArt(program, art.bitmap, art.separateBadges, accent)
@@ -196,7 +200,7 @@ internal fun rememberTvRowFocusSpec(
 }
 
 @Composable
-internal fun PosterBadgesContent(image: String, modifier: Modifier = Modifier) {
+internal fun PosterBadgesContent(image: String, modifier: Modifier = Modifier, inset: Float = 6f) {
   val metadata = remember(image) { PosterBadges.metadata(image) } ?: return
   val episode = PosterBadgeSpec.episode(metadata.optString("season"), metadata.optString("mark"))
   val news = metadata.optString("news")
@@ -223,7 +227,7 @@ internal fun PosterBadgesContent(image: String, modifier: Modifier = Modifier) {
       overflow = TextOverflow.Ellipsis,
     )
   }
-  Box(modifier.padding(5.dp)) {
+  Box(modifier.padding(inset.dp)) {
     if (episode.isNotEmpty()) Box(Modifier.align(Alignment.TopStart)) { chip(episode) }
     if (news.isNotEmpty()) Box(Modifier.align(Alignment.BottomEnd)) { chip(news) }
   }
@@ -252,7 +256,7 @@ internal fun PosterCard(
       ),
       label = "poster focus",
     )
-  val shape = RoundedCornerShape((12f * layout.posterWidth / HomeLayout.PosterWidth).dp)
+  val shape = RoundedCornerShape(layout.cornerRadius.dp)
   val description =
     remember(art.program) {
       listOf(art.program.title, SelectionCaption.description(art.program.image))
@@ -344,7 +348,8 @@ internal fun PosterCard(
             Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
           )
-        if (art.clean) PosterBadgesContent(art.program.image, Modifier.fillMaxSize())
+        if (art.clean && layout.showBadges)
+          PosterBadgesContent(art.program.image, Modifier.fillMaxSize(), layout.badgeInset)
       }
     }
   }
@@ -396,7 +401,10 @@ internal fun HomeContent(
   val row = rememberScrollState()
   val density = LocalDensity.current
   val rowFocus = rememberTvRowFocusSpec(layout.posterWidth + layout.gap, layout.motion)
-  val posterFocus = remember(posters.map { it.program.intent }) { posters.map { FocusRequester() } }
+  val posterFocus =
+    remember(posters.map { it.program.intent }) {
+      posters.map { FocusRequester() }
+    }
   val choosePoster =
     remember(onPosterFocus) {
       { index: Int ->
@@ -427,24 +435,29 @@ internal fun HomeContent(
       } else settings.requestFocus()
     }
   }
+  val windowPixels = LocalWindowInfo.current.containerSize
   Box(
     modifier
       .fillMaxSize()
-      .then(if (preview) Modifier.background(MaterialTheme.colorScheme.background) else Modifier)
-  ) {
-    if (!preview) {
-      val backgroundColor = MaterialTheme.colorScheme.background.toArgb()
-      AndroidView(
-        factory = { BackdropSurface(it) },
-        modifier = Modifier.fillMaxSize(),
-        update = { it.show(wallpaper, backgroundColor) },
+      .then(
+        if (preview || wallpaper == null) Modifier.background(MaterialTheme.colorScheme.background)
+        else Modifier
       )
-    } else if (wallpaper != null && !wallpaper.isRecycled)
+  ) {
+    if (wallpaper != null && !wallpaper.isRecycled)
       Image(
         remember(wallpaper) { wallpaper.asImageBitmap() },
         null,
         Modifier.fillMaxSize(),
         contentScale = ContentScale.Crop,
+        filterQuality =
+          if (
+            !preview &&
+              wallpaper.width == windowPixels.width &&
+              wallpaper.height == windowPixels.height
+          )
+            FilterQuality.None
+          else FilterQuality.Low,
       )
     Row(
       Modifier.align(Alignment.TopEnd)
@@ -552,48 +565,106 @@ internal fun HomeContent(
       val top =
         if (layout.mode == 0) layout.posterTop + layout.posterHeight + 24
         else layout.posterTop - if (layout.captionStyle == 1) 80 else 52
-      val details = SelectionCaption.description(art.program.image)
-      if (layout.captionStyle == 4)
-        Row(
-          Modifier.offset(x = 32.dp, y = top.dp).width(896.dp).graphicsLayer(),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text(
-            art.program.title,
-            Modifier.widthIn(max = 560.dp),
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-          if (details.isNotEmpty())
-            Text(
-              details,
-              Modifier.padding(start = 12.dp).widthIn(max = 324.dp),
-              fontSize = 16.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
-        }
-      else
-        Column(Modifier.offset(x = 32.dp, y = top.dp).width(896.dp).graphicsLayer()) {
-          Text(
-            art.program.title,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-          if (layout.captionStyle == 1 && details.isNotEmpty())
-            Text(
-              details,
-              Modifier.padding(top = 8.dp),
-              fontSize = 14.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
-        }
+      HomeCaption(
+        Caption(art.program.title, SelectionCaption.description(art.program.image)),
+        layout,
+        Modifier.offset(x = 32.dp, y = top.dp).width(896.dp),
+      )
     }
+  }
+}
+
+private data class Caption(val title: String, val details: String)
+
+private class CaptionLayer(val caption: Caption, initialOpacity: Float) {
+  val opacity = Animatable(initialOpacity)
+}
+
+@Composable
+private fun HomeCaption(target: Caption, layout: HomeLayout, modifier: Modifier) {
+  val accessible = modifier.clearAndSetSemantics {
+    contentDescription =
+      listOf(target.title, target.details).filter { it.isNotEmpty() }.joinToString(", ")
+  }
+  if (!layout.animateTitle) {
+    CaptionContent(target, layout, accessible)
+    return
+  }
+  val layers = remember { mutableStateListOf(CaptionLayer(target, 1f)) }
+  LaunchedEffect(target) {
+    val incoming =
+      layers.firstOrNull { it.caption == target }
+        ?: CaptionLayer(target, 0f).also { layers.add(it) }
+    kotlinx.coroutines.coroutineScope {
+      layers.toList().forEach { layer ->
+        launch {
+          val to = if (layer === incoming) 1f else 0f
+          if (layer.opacity.value != to)
+            layer.opacity.animateTo(to, tween(120, easing = LinearEasing))
+          if (layer !== incoming) layers.remove(layer)
+        }
+      }
+    }
+  }
+  Box(accessible) {
+    layers.forEach { layer ->
+      key(layer) {
+        CaptionContent(
+          layer.caption,
+          layout,
+          Modifier.fillMaxWidth().graphicsLayer {
+            alpha = layer.opacity.value
+            compositingStrategy = CompositingStrategy.ModulateAlpha
+          },
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun CaptionContent(caption: Caption, layout: HomeLayout, modifier: Modifier) {
+  Box(modifier) {
+    if (layout.captionStyle == 4)
+      Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          caption.title,
+          Modifier.widthIn(max = 560.dp),
+          fontSize = 22.sp,
+          fontWeight = FontWeight.Medium,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        if (caption.details.isNotEmpty())
+          Text(
+            caption.details,
+            Modifier.padding(start = 12.dp).widthIn(max = 324.dp),
+            fontSize = 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+      }
+    else
+      Column(Modifier.fillMaxWidth()) {
+        Text(
+          caption.title,
+          fontSize = 22.sp,
+          fontWeight = FontWeight.Medium,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        if (layout.captionStyle == 1 && caption.details.isNotEmpty())
+          Text(
+            caption.details,
+            Modifier.padding(top = 8.dp),
+            fontSize = 14.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+      }
   }
 }
 
@@ -662,7 +733,7 @@ internal fun HomePreview(
       withContext(Dispatchers.IO) {
         val store = PosterStore(context)
         ProgramRepository(context).cached().take(16).map {
-          preparePosterArt(it, store)
+          preparePosterArt(it, store, cachedOnly = true)
         }
       }
   }

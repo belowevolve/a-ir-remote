@@ -80,19 +80,33 @@ class WallpaperController(
     hourShown = hour
     val request: Int = ++generation
     render?.cancel(true)
+    val identity = requestKey(hour, style)
+    WallpaperFrames.peek(identity)?.let {
+      it.theme?.save(context, it.key)
+      listener?.accept(it.image!!, it.theme)
+      return
+    }
     render =
       decode.submit(
         Runnable {
           if (request != generation || closed) return@Runnable
           val store: WallpaperStore = WallpaperStore(context)
           val selected: File? = store.selected(hour)
-          val result: Prepared = prepare(context, selected)
+          val renderKey =
+            context.filesDir.path +
+              ":" +
+              (selected?.let { it.name + ":" + it.lastModified() } ?: FallbackThemeKey) +
+              ":" +
+              style
+          val saved = WallpaperFrames.read(context, identity, renderKey)
+          val result: Prepared = saved ?: prepare(context, selected)
           val ready: Bitmap? = result.image
           val readyTheme: WallpaperTheme? = result.theme
           val themeKey: String = result.key
+          if (request != generation || closed) return@Runnable
+          if (ready != null) WallpaperFrames.remember(identity, renderKey, result)
           main.post({
             if (closed || request != generation) {
-              if (ready != null) ready.recycle()
               return@post
             }
             if (ready != null) {
@@ -100,8 +114,32 @@ class WallpaperController(
               listener!!.accept(ready, readyTheme)
             }
           })
+          if (saved == null && request == generation && !closed)
+            WallpaperFrames.write(context, renderKey, result)
         }
       )
+  }
+
+  fun cached(): Prepared? =
+    WallpaperFrames.peek(
+      requestKey(System.currentTimeMillis() / 3600000, BackdropStyle(context).fingerprint())
+    )
+
+  private fun requestKey(hour: Long, style: String): String {
+    val p = context.getSharedPreferences("home", 0)
+    return context.filesDir.path +
+      ":" +
+      hour +
+      ":" +
+      style +
+      ":" +
+      p.getString("wallpaper_anchor_file", "") +
+      ":" +
+      p.getLong("wallpaper_anchor_hour", 0) +
+      ":" +
+      p.getInt("wallpaper_offset", 0) +
+      ":" +
+      p.getLong("wallpaper_revision", 0)
   }
 
   class Prepared(val image: Bitmap?, val theme: WallpaperTheme?, val key: String)
@@ -181,6 +219,7 @@ class WallpaperController(
         checkCancelled()
         BackdropStyle(context).apply(prepared, checkCancelled)
         checkCancelled()
+        prepared.setHasAlpha(false)
         prepared.prepareToDraw()
         return Prepared(prepared, theme, themeKey)
       } catch (error: Throwable) {

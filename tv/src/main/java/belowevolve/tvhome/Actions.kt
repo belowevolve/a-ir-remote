@@ -7,6 +7,14 @@ import android.view.*
 import android.widget.*
 
 object Actions {
+    val bindingsUri: android.net.Uri =
+        android.net.Uri.parse("content://belowevolve.tvhome.theme/bindings")
+
+    fun setBinding(c: Context, key: Int, action: String) {
+        c.getSharedPreferences("home", 0).edit().putString("key_$key", action).apply()
+        c.contentResolver.notifyChange(bindingsUri, null)
+    }
+
     val VIDEO_APP: String = "io.gh.reisxd.tizentube.cobalt"
 
     var lastVpnToggle: Long = 0
@@ -62,15 +70,15 @@ object Actions {
         c.sendBroadcast(
             Intent(
                     if (on) "org.amnezia.awg.action.SET_TUNNEL_DOWN"
-                    else "org.amnezia.awg.action.SET_TUNNEL_UP",
+                    else "org.amnezia.awg.action.SET_TUNNEL_UP"
                 )
                 .setComponent(
                     ComponentName(
                         "org.amnezia.awg",
                         "org.amnezia.awg.model.TunnelManager\$IntentReceiver",
-                    ),
+                    )
                 )
-                .putExtra("tunnel", "tv-home"),
+                .putExtra("tunnel", "tv-home")
         )
         Ui.toast(c, if (on) "Отключение VPN" else "Подключение VPN")
     }

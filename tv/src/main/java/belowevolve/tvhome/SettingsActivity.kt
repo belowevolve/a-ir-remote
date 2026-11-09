@@ -9,8 +9,6 @@ import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -103,20 +101,17 @@ class SettingsActivity : QuietActivity() {
             finish()
           }
         else
-          Column(
-            Modifier.widthIn(max = 640.dp)
-              .fillMaxHeight()
-              .align(Alignment.TopCenter)
-              .padding(top = 24.dp)
-          ) {
-            TvHeader(title, { onRemoteBack() })
-            Spacer(Modifier.height(8.dp))
-            key(page) {
-              LazyColumn(
-                Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 24.dp),
-              ) {
+          key(page) {
+            Column(
+              Modifier.widthIn(max = 640.dp)
+                .fillMaxHeight()
+                .align(Alignment.TopCenter)
+                .verticalScroll(rememberScrollState())
+                .padding(top = 24.dp, bottom = 24.dp)
+            ) {
+              TvHeader(title, { onRemoteBack() })
+              Spacer(Modifier.height(8.dp))
+              Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (page) {
                   "main" -> {
                     val entries =
@@ -140,7 +135,7 @@ class SettingsActivity : QuietActivity() {
                           "android",
                         ),
                       )
-                    items(entries) { (text, icon, target) ->
+                    entries.forEach { (text, icon, target) ->
                       @Composable
                       fun action(modifier: Modifier) {
                         TvAction(text, modifier.fillMaxWidth(), icon) {
@@ -169,7 +164,7 @@ class SettingsActivity : QuietActivity() {
                     }
                   }
                   "inputs" -> {
-                    items(inputs, key = { it.id }) { input ->
+                    inputs.forEach { input ->
                       @Composable
                       fun action(modifier: Modifier) {
                         TvAction(
@@ -204,7 +199,7 @@ class SettingsActivity : QuietActivity() {
                     }
                   }
                   "keys" ->
-                    items(names) { name ->
+                    names.forEach { name ->
                       val code = 183 + names.indexOf(name)
                       @Composable
                       fun action(modifier: Modifier) {
@@ -239,7 +234,7 @@ class SettingsActivity : QuietActivity() {
                           "settings",
                           "none",
                         )
-                      items(actions) { action ->
+                      actions.forEach { action ->
                         @Composable
                         fun entry(modifier: Modifier) {
                           TvAction(
@@ -252,17 +247,14 @@ class SettingsActivity : QuietActivity() {
                                 colorCode,
                               ) == action,
                           ) {
-                            getSharedPreferences("home", 0)
-                              .edit()
-                              .putString("key_$colorCode", action)
-                              .apply()
+                            Actions.setBinding(this@SettingsActivity, colorCode, action)
                             page = "keys"
                           }
                         }
                         if (action == actions.first()) FocusFirst { entry(it) } else entry(Modifier)
                       }
                     }
-                    items(apps, key = { it.packageName }) { app ->
+                    apps.forEach { app ->
                       @Composable
                       fun entry(modifier: Modifier) {
                         TvAction(
@@ -271,13 +263,7 @@ class SettingsActivity : QuietActivity() {
                           leading = { AppIcon(app.icon, Modifier.size(24.dp)) },
                           onClick = {
                             if (page.startsWith("key:")) {
-                              getSharedPreferences("home", 0)
-                                .edit()
-                                .putString(
-                                  "key_$colorCode",
-                                  app.packageName,
-                                )
-                                .apply()
+                              Actions.setBinding(this@SettingsActivity, colorCode, app.packageName)
                               page = "keys"
                             } else
                               Actions.run(

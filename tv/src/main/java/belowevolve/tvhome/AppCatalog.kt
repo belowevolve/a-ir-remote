@@ -14,6 +14,8 @@ import java.util.LinkedHashMap
 
 /* Installed apps with a TV or regular launcher entry; one row per package. */
 object AppCatalog {
+  private var cached: List<App> = emptyList()
+  private var packagesKey = ""
   private val HIDDEN: Set<String> =
     HashSet<String>(
       Arrays.asList<String>(
@@ -27,6 +29,11 @@ object AppCatalog {
 
   fun load(context: Context): ArrayList<App> {
     val pm: PackageManager = context.getPackageManager()
+    val version =
+      pm.getInstalledPackages(0).joinToString { "${it.packageName}:${it.lastUpdateTime}" }
+    synchronized(this) {
+      if (version == packagesKey && cached.isNotEmpty()) return ArrayList(cached)
+    }
     val apps: LinkedHashMap<String, App> = LinkedHashMap<String, App>()
     for (category: String in
       arrayOf<String>(Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER)) {
@@ -51,6 +58,10 @@ object AppCatalog {
     val result: ArrayList<App> = ArrayList<App>(apps.values)
     val order: Collator = Collator.getInstance()
     result.sortWith { a, b -> order.compare(a.label, b.label) }
+    synchronized(this) {
+      cached = result
+      packagesKey = version
+    }
     return result
   }
 }

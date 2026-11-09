@@ -3,6 +3,7 @@ package belowevolve.tvhome
 import android.content.Context
 import android.graphics.*
 import android.net.Uri
+import android.util.LruCache
 import java.io.*
 import java.net.*
 import java.nio.charset.StandardCharsets
@@ -39,7 +40,31 @@ class PosterStore(context: Context) {
     return if (clean != null) CardArtwork(clean, true) else CardArtwork(read(uri), false)
   }
 
+  internal fun loadCachedCard(uri: String): CardArtwork = loadCard(uri, ::loadCached)
+
+  private fun memoryKey(uri: String) =
+    context.filesDir.path + ":" + context.resources.displayMetrics.density + ":" + uri
+
+  private fun loadCached(uri: String): Bitmap? {
+    val key = memoryKey(uri)
+    memory.get(key)?.let { if (!it.image.isRecycled) return it.image else memory.remove(key) }
+    val name = UUID.nameUUIDFromBytes(uri.toByteArray(StandardCharsets.UTF_8)).toString() + ".img"
+    val file = File(File(context.filesDir, "posters"), name)
+    if (!file.isFile) return null
+    val image = decode(file)
+    if (image == null) file.delete() else memory.put(key, Cached(image))
+    return image
+  }
+
   fun load(uri: String): Bitmap? {
+    val key = memoryKey(uri)
+    loadCached(uri)?.let {
+      return it
+    }
+    return loadUncached(uri)?.also { memory.put(key, Cached(it)) }
+  }
+
+  private fun loadUncached(uri: String): Bitmap? {
     var temporary: File? = null
     try {
       val dir: File = File(context.getFilesDir(), "posters")
@@ -127,7 +152,7 @@ class PosterStore(context: Context) {
               setLocalMatrix(matrix)
             }
         }
-      val radius = 12f * targetWidth / HomeLayout.PosterWidth
+      val radius = HomeLayout.posterCorner(targetWidth)
       Canvas(compact)
         .drawRoundRect(
           RectF(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat()),
@@ -150,5 +175,14 @@ class PosterStore(context: Context) {
     c.setConnectTimeout(6000)
     c.setReadTimeout(8000)
     return c.getInputStream()
+  }
+
+  companion object {
+    private class Cached(val image: Bitmap, val bytes: Int = image.allocationByteCount)
+
+    private val memory =
+      object : LruCache<String, Cached>(16 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Cached) = value.bytes
+      }
   }
 }

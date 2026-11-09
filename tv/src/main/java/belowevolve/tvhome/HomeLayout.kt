@@ -19,6 +19,10 @@ class HomeLayout(c: Context) {
   val glow: Int
   val shadow: Int
   val showTitle: Boolean
+  val showBadges: Boolean
+  val animateTitle: Boolean
+  val cornerRadius: Float
+  val badgeInset: Float
 
   init {
     val p: SharedPreferences = c.getSharedPreferences("appearance", 0)
@@ -27,6 +31,10 @@ class HomeLayout(c: Context) {
     size = clamp(p.getInt("poster_size", 1), 0, 2)
     posterWidth = cardWidth(size, gap)
     posterHeight = (posterWidth * 1.5f).roundToInt()
+    cornerRadius = posterCorner(posterWidth)
+    badgeInset = posterBadgeInset(posterWidth)
+    showBadges = p.getBoolean("poster_badges", true)
+    animateTitle = p.getBoolean("animate_title", true)
     glow = clamp(p.getInt("poster_glow", 100), 0, 100)
     shadow = clamp(p.getInt("poster_shadow", 0), 0, PosterShadow.NAMES.lastIndex)
     bottom = clamp(p.getInt("bottom_inset", 32), 24, 160)
@@ -51,6 +59,7 @@ class HomeLayout(c: Context) {
   companion object {
     // Defaults also define the reusable artwork/shadow template, independent of the size preset.
     const val PosterWidth = 132
+    const val CornerRadius = 12f
     const val PosterHeight = 198
     const val PosterGap = 12
     const val RowInset = 32
@@ -63,6 +72,11 @@ class HomeLayout(c: Context) {
     val CAPTIONS: Array<String> =
       arrayOf<String>("Название", "Название и серия", "В одну строку", "Без подписи")
     val MOTIONS: Array<String> = CardMotion.NAMES
+
+    fun posterCorner(width: Int) = CornerRadius * width / PosterWidth
+
+    fun posterBadgeInset(width: Int) =
+      maxOf(4f, posterCorner(width) - belowevolve.shared.design.PosterBadgeSpec.CORNER_DP)
 
     fun cardWidth(size: Int, gap: Int): Int {
       val fullCards = 7 - size.coerceIn(0, 2)

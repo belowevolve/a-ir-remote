@@ -71,6 +71,7 @@ class LauncherRegressionRunner : Instrumentation() {
       checkArtworkSources(context)
       checkViews(context)
       checkWallpaperPreview(context)
+      checkPreparedWallpaper(context)
       ColorKeyActionsRegression.run()
       val wallpaper: Actions.PreparedAction? = Actions.prepare(context, "next-wallpaper")
       check(
@@ -122,6 +123,36 @@ class LauncherRegressionRunner : Instrumentation() {
     } finally {
       if (directory != null) remove(directory)
     }
+  }
+
+  /** Display caches preserve exact opaque pixels and the palette of the untreated photograph. */
+  private fun checkPreparedWallpaper(context: Context) {
+    val image = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+    image.eraseColor(Color.rgb(42, 67, 95))
+    image.setHasAlpha(false)
+    val colors = IntArray(7) { Color.rgb(20 + it, 35 + it, 50 + it) }
+    val prepared =
+      WallpaperController.Prepared(
+        image,
+        WallpaperTheme.restore(Color.BLUE, colors, "source"),
+        "source",
+      )
+    WallpaperFrames.write(context, "cache-roundtrip", prepared)
+    val loaded = WallpaperFrames.read(context, "request-a", "cache-roundtrip")
+    check(loaded?.image != null, "Prepared wallpaper cache did not load")
+    check(
+      loaded!!.image!!.getPixel(900, 500) == image.getPixel(900, 500),
+      "Prepared wallpaper cache changed pixels",
+    )
+    check(loaded.theme!!.colors.contentEquals(colors), "Prepared cache lost the original palette")
+    check(!loaded.image!!.hasAlpha(), "Opaque wallpaper must not blend the full screen")
+    check(WallpaperFrames.peek("request-a") === loaded, "Prepared frame was not reused")
+    check(
+      WallpaperFrames.peek("different-selection") == null,
+      "Old selection reused a stale wallpaper",
+    )
+    image.recycle()
+    loaded.image!!.recycle()
   }
 
   /** Preview work stays bounded and never modifies the original photo or user appearance. */
@@ -329,11 +360,20 @@ class LauncherRegressionRunner : Instrumentation() {
     val store: PosterStore = PosterStore(context)
     checkColor(store.load(first), Color.RED)
     checkColor(store.load(second), Color.BLUE)
+
     val cached: Array<File>? = File(context.getFilesDir(), "posters").listFiles()
     check(cached != null && cached.size == 2, "Different posters shared a cache entry")
     for (file: File in cached!!) Files.write(file.toPath(), byteArrayOf(0, 1, 2))
     checkColor(store.load(first), Color.RED)
     checkColor(store.load(second), Color.BLUE)
+    red.delete()
+    blue.delete()
+    checkColor(store.loadCachedCard(first).bitmap, Color.RED)
+    checkColor(store.loadCachedCard(second).bitmap, Color.BLUE)
+    check(
+      store.loadCachedCard("https://example.invalid/uncached").bitmap == null,
+      "Cache-only pass must allow missing artwork",
+    )
   }
 
   @Throws(Exception::class)

@@ -16,6 +16,10 @@ class ThemeProvider : ContentProvider() {
             "belowevolve.tvhome.permission.READ_THEME",
             "Signed theme client required",
         )
+        if (method == "bindings")
+            return Bundle().apply {
+                for (key in 183..186) putString(key.toString(), Actions.binding(context, key))
+            }
         require(method == "palette") { "Unknown theme method" }
         return WallpaperTheme.load(context)?.filmPalette() ?: Bundle.EMPTY
     }

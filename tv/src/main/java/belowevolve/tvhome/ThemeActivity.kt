@@ -4,8 +4,8 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,17 +31,21 @@ class ThemeActivity : QuietActivity() {
   private fun ThemeScreen() {
     var revision by remember { mutableIntStateOf(0) }
     var motionPreview by remember { mutableIntStateOf(0) }
-    val controls = rememberLazyListState()
+    val controls = rememberScrollState()
     val first = remember { FocusRequester() }
     val inputMode = LocalInputModeManager.current
     LaunchedEffect(Unit) {
       inputMode.requestInputMode(InputMode.Keyboard)
-      controls.scrollToItem(0)
+      controls.scrollTo(0)
       withFrameNanos {}
       first.requestFocus()
     }
     fun set(key: String, value: Int) {
       getSharedPreferences("appearance", 0).edit().putInt(key, value).apply()
+      revision++
+    }
+    fun flag(key: String, value: Boolean) {
+      getSharedPreferences("appearance", 0).edit().putBoolean(key, value).apply()
       revision++
     }
     val layout = remember(revision) { HomeLayout(this) }
@@ -63,203 +67,197 @@ class ThemeActivity : QuietActivity() {
               focusRequest = motionPreview,
             )
           }
-          LazyColumn(
-            Modifier.width(340.dp).fillMaxHeight(),
-            state = controls,
+          Column(
+            Modifier.width(340.dp)
+              .fillMaxHeight()
+              .verticalScroll(controls)
+              .padding(top = 72.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(top = 72.dp, bottom = 24.dp),
           ) {
-            item {
-              TvAction(
-                "Компоновка",
-                Modifier.focusRequester(first).fillMaxWidth(),
-                trailingText = HomeLayout.NAMES[layout.mode],
-              ) {
-                set("layout", 1 - layout.mode)
-              }
+            TvAction(
+              "Компоновка",
+              Modifier.focusRequester(first).fillMaxWidth(),
+              trailingText = HomeLayout.NAMES[layout.mode],
+            ) {
+              set("layout", 1 - layout.mode)
             }
+
             if (layout.mode == 1)
-              item {
+              ThemeSlider(
+                "Отступ снизу",
+                "bottom_inset",
+                layout.bottom,
+                24,
+                160,
+                4,
+                ::set,
+              )
+
+            TvAction(
+              "Подпись",
+              Modifier.fillMaxWidth(),
+              trailingText = HomeLayout.CAPTIONS[layout.captionIndex()],
+            ) {
+              set(
+                "caption_style",
+                HomeLayout.CAPTION_IDS[(layout.captionIndex() + 1) % HomeLayout.CAPTIONS.size],
+              )
+            }
+
+            TvAction(
+              "Анимация",
+              Modifier.fillMaxWidth(),
+              trailingText = HomeLayout.MOTIONS[layout.motion],
+            ) {
+              set("card_motion_v2", (layout.motion + 1) % HomeLayout.MOTIONS.size)
+              motionPreview++
+            }
+
+            TvAction(
+              "Размер карточек",
+              Modifier.fillMaxWidth(),
+              trailingText = HomeLayout.SIZES[layout.size],
+            ) {
+              set("poster_size", (layout.size + 1) % HomeLayout.SIZES.size)
+            }
+
+            TvAction(
+              "Бейджи на главной",
+              Modifier.fillMaxWidth(),
+              trailingText = if (layout.showBadges) "Показывать" else "Скрывать",
+            ) {
+              flag("poster_badges", !layout.showBadges)
+            }
+            TvAction(
+              "Анимация заголовка",
+              Modifier.fillMaxWidth(),
+              trailingText = if (layout.animateTitle) "Плавная" else "Выключена",
+            ) {
+              flag("animate_title", !layout.animateTitle)
+            }
+            ThemeSlider("Интервал карточек", "poster_gap", layout.gap, 8, 32, 4, ::set)
+
+            TvAction(
+              "Тень карточек",
+              Modifier.fillMaxWidth(),
+              trailingText = PosterShadow.NAMES[layout.shadow],
+            ) {
+              set("poster_shadow", (layout.shadow + 1) % PosterShadow.NAMES.size)
+            }
+
+            if (layout.shadow != PosterShadow.None)
+              ThemeSlider("Сила тени карточек", "poster_glow", layout.glow, 0, 100, 5, ::set)
+
+            TvAction(
+              "Обработка фона",
+              Modifier.fillMaxWidth(),
+              trailingText = BackdropStyle.NAMES[style.mode],
+            ) {
+              set("mode", (style.mode + 1) % BackdropStyle.NAMES.size)
+            }
+
+            when (style.mode) {
+              0 -> ThemeSlider("Затемнение", "dim", style.dim, 0, 90, 5, ::set)
+
+              1 -> {
+
                 ThemeSlider(
-                  "Отступ снизу",
-                  "bottom_inset",
-                  layout.bottom,
-                  24,
-                  160,
-                  4,
+                  "Высота от нижнего края",
+                  "reach",
+                  style.reach,
+                  5,
+                  100,
+                  5,
+                  ::set,
+                )
+
+                ThemeSlider(
+                  "Затемнение внизу",
+                  "gradient_dim",
+                  style.gradientDim,
+                  0,
+                  100,
+                  5,
                   ::set,
                 )
               }
-            item {
-              TvAction(
-                "Подпись",
-                Modifier.fillMaxWidth(),
-                trailingText = HomeLayout.CAPTIONS[layout.captionIndex()],
-              ) {
-                set(
-                  "caption_style",
-                  HomeLayout.CAPTION_IDS[(layout.captionIndex() + 1) % HomeLayout.CAPTIONS.size],
+              2 -> {
+
+                TvAction(
+                  "Тень: ${listOf("Мягкая","Широкая","По постеру")[style.mat]}",
+                  Modifier.fillMaxWidth(),
+                ) {
+                  set("mat", (style.mat + 1) % 3)
+                }
+
+                ThemeSlider(
+                  "Сила тени",
+                  "mat_opacity",
+                  style.matOpacity,
+                  20,
+                  100,
+                  5,
+                  ::set,
+                )
+
+                ThemeSlider(
+                  "Затемнение фотографии",
+                  "mat_dim",
+                  style.matDim,
+                  0,
+                  90,
+                  5,
+                  ::set,
+                )
+              }
+              3 -> {
+
+                ThemeSlider("Размытие", "blur", style.blur, 0, 100, 5, ::set)
+
+                ThemeSlider(
+                  "Затемнение полосы",
+                  "blur_dim",
+                  style.blurDim,
+                  0,
+                  90,
+                  5,
+                  ::set,
+                )
+
+                ThemeSlider(
+                  "Высота полосы",
+                  "blur_height",
+                  style.blurHeight,
+                  10,
+                  80,
+                  5,
+                  ::set,
+                )
+
+                ThemeSlider(
+                  "Мягкость краёв",
+                  "feather",
+                  style.feather,
+                  0,
+                  50,
+                  5,
+                  ::set,
                 )
               }
             }
-            item {
-              TvAction(
-                "Анимация",
-                Modifier.fillMaxWidth(),
-                trailingText = HomeLayout.MOTIONS[layout.motion],
-              ) {
-                set("card_motion_v2", (layout.motion + 1) % HomeLayout.MOTIONS.size)
-                motionPreview++
-              }
-            }
-            item {
-              TvAction(
-                "Размер карточек",
-                Modifier.fillMaxWidth(),
-                trailingText = HomeLayout.SIZES[layout.size],
-              ) {
-                set("poster_size", (layout.size + 1) % HomeLayout.SIZES.size)
-              }
-            }
-            item {
-              ThemeSlider("Интервал карточек", "poster_gap", layout.gap, 8, 32, 4, ::set)
-            }
-            item {
-              TvAction(
-                "Тень карточек",
-                Modifier.fillMaxWidth(),
-                trailingText = PosterShadow.NAMES[layout.shadow],
-              ) {
-                set("poster_shadow", (layout.shadow + 1) % PosterShadow.NAMES.size)
-              }
-            }
-            if (layout.shadow != PosterShadow.None)
-              item {
-                ThemeSlider("Сила тени карточек", "poster_glow", layout.glow, 0, 100, 5, ::set)
-              }
-            item {
-              TvAction(
-                "Обработка фона",
-                Modifier.fillMaxWidth(),
-                trailingText = BackdropStyle.NAMES[style.mode],
-              ) {
-                set("mode", (style.mode + 1) % BackdropStyle.NAMES.size)
-              }
-            }
-            when (style.mode) {
-              0 ->
-                item {
-                  ThemeSlider("Затемнение", "dim", style.dim, 0, 90, 5, ::set)
-                }
-              1 -> {
-                item {
-                  ThemeSlider(
-                    "Высота от нижнего края",
-                    "reach",
-                    style.reach,
-                    5,
-                    100,
-                    5,
-                    ::set,
-                  )
-                }
-                item {
-                  ThemeSlider(
-                    "Затемнение внизу",
-                    "gradient_dim",
-                    style.gradientDim,
-                    0,
-                    100,
-                    5,
-                    ::set,
-                  )
-                }
-              }
-              2 -> {
-                item {
-                  TvAction(
-                    "Тень: ${listOf("Мягкая","Широкая","По постеру")[style.mat]}",
-                    Modifier.fillMaxWidth(),
-                  ) {
-                    set("mat", (style.mat + 1) % 3)
-                  }
-                }
-                item {
-                  ThemeSlider(
-                    "Сила тени",
-                    "mat_opacity",
-                    style.matOpacity,
-                    20,
-                    100,
-                    5,
-                    ::set,
-                  )
-                }
-                item {
-                  ThemeSlider(
-                    "Затемнение фотографии",
-                    "mat_dim",
-                    style.matDim,
-                    0,
-                    90,
-                    5,
-                    ::set,
-                  )
-                }
-              }
-              3 -> {
-                item {
-                  ThemeSlider("Размытие", "blur", style.blur, 0, 100, 5, ::set)
-                }
-                item {
-                  ThemeSlider(
-                    "Затемнение полосы",
-                    "blur_dim",
-                    style.blurDim,
-                    0,
-                    90,
-                    5,
-                    ::set,
-                  )
-                }
-                item {
-                  ThemeSlider(
-                    "Высота полосы",
-                    "blur_height",
-                    style.blurHeight,
-                    10,
-                    80,
-                    5,
-                    ::set,
-                  )
-                }
-                item {
-                  ThemeSlider(
-                    "Мягкость краёв",
-                    "feather",
-                    style.feather,
-                    0,
-                    50,
-                    5,
-                    ::set,
-                  )
-                }
-              }
-            }
-            item {
-              TvAction("Сбросить этот режим", Modifier.fillMaxWidth()) {
-                val keys =
-                  listOf(
-                    listOf("dim"),
-                    listOf("reach", "gradient_dim"),
-                    listOf("mat", "mat_dim", "mat_opacity"),
-                    listOf("blur", "blur_dim", "blur_height", "feather"),
-                  )
-                val edit = getSharedPreferences("appearance", 0).edit()
-                keys[style.mode].forEach { edit.remove(it) }
-                edit.apply()
-                revision++
-              }
+
+            TvAction("Сбросить этот режим", Modifier.fillMaxWidth()) {
+              val keys =
+                listOf(
+                  listOf("dim"),
+                  listOf("reach", "gradient_dim"),
+                  listOf("mat", "mat_dim", "mat_opacity"),
+                  listOf("blur", "blur_dim", "blur_height", "feather"),
+                )
+              val edit = getSharedPreferences("appearance", 0).edit()
+              keys[style.mode].forEach { edit.remove(it) }
+              edit.apply()
+              revision++
             }
           }
         }

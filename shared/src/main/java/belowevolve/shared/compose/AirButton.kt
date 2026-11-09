@@ -1,7 +1,7 @@
 package belowevolve.shared.compose
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -44,11 +44,11 @@ fun AirButton(
 ) {
   val interaction = remember { MutableInteractionSource() }
   var focused by remember { mutableStateOf(false) }
-  val background =
-    animateColorAsState(
-      if (focused || selected) focusedColor else color,
+  val emphasis =
+    animateFloatAsState(
+      if (focused || selected) 1f else 0f,
       animationSpec = tween(100, easing = FastOutSlowInEasing),
-      label = "action color",
+      label = "action emphasis",
     )
   CompositionLocalProvider(
     LocalContentColor provides if (focused || selected) focusedContentColor else contentColor
@@ -58,7 +58,10 @@ fun AirButton(
         .graphicsLayer()
         .drawWithCache {
           val outline = shape.createOutline(size, layoutDirection, this)
-          onDrawBehind { drawOutline(outline, background.value) }
+          onDrawBehind {
+            drawOutline(outline, color)
+            drawOutline(outline, focusedColor, alpha = emphasis.value)
+          }
         }
         .onFocusChanged {
           focused = it.isFocused

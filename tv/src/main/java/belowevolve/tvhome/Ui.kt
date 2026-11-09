@@ -13,7 +13,6 @@ import belowevolve.shared.design.RemoteShapes
 import belowevolve.shared.design.RemoteSpacing
 
 object Ui {
-    private const val CardCornerDp = 12f
     // Cached wallpaper roles; Air Remote's base palette is the first-launch fallback.
     var BG: Int = RemotePalette.Background
     var TEXT: Int = RemotePalette.Text

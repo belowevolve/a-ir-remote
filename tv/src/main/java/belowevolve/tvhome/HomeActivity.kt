@@ -29,6 +29,12 @@ class HomeActivity : QuietActivity() {
   private var signature = ""
   private var loadJob: Job? = null
   private var loadAgain = false
+  private var artworkJob: Job? = null
+  private val cachedArtwork = Dispatchers.IO.limitedParallelism(2)
+  private val fetchedArtwork = Dispatchers.IO.limitedParallelism(2)
+  private var programsKnown = false
+  private var readyReported = false
+  private val createdAt = SystemClock.uptimeMillis()
   private lateinit var wallpapers: WallpaperController
   private lateinit var programs: ProgramRepository
   private lateinit var artwork: PosterStore
@@ -81,20 +87,29 @@ class HomeActivity : QuietActivity() {
           background = image
           theme = palette
           Ui.useTheme(palette)
+          reportReady()
         },
       )
+    wallpapers.cached()?.let {
+      background = it.image
+      theme = it.theme
+      Ui.useTheme(it.theme)
+    }
+    if (snapshotDirectory == filesDir.path) {
+      posters = snapshotPosters
+      programsKnown = posters.isNotEmpty()
+    }
     setContent {
       HomeTheme(theme) {
-        key(appearance) {
-          HomeContent(
-            background,
-            posters,
-            clock,
-            vpn,
-            focusRequest = focusRequest,
-            onPosterFocus = { focusedPoster = it },
-          )
-        }
+        HomeContent(
+          background,
+          posters,
+          clock,
+          vpn,
+          focusRequest = focusRequest,
+          onPosterFocus = { focusedPoster = it },
+          appearance = appearance,
+        )
       }
     }
     scope.launch {
@@ -124,6 +139,7 @@ class HomeActivity : QuietActivity() {
   }
 
   private fun showPrograms(programs: List<ProgramRepository.Program>) {
+    programsKnown = true
     val next = programs.joinToString { it.intent + it.image + it.title }
     if (next == signature) return
     signature = next
@@ -140,21 +156,58 @@ class HomeActivity : QuietActivity() {
         if (sameArtwork && old?.bitmap?.isRecycled == false) old.copy(program = program)
         else PosterArt(program)
       }
-    val dispatcher = Dispatchers.IO.limitedParallelism(2)
-    posters
-      .filter { it.bitmap == null }
-      .forEach { item ->
-        scope.launch {
-          val loaded =
-            withContext(dispatcher) {
-              preparePosterArt(item.program, artwork)
+    snapshotDirectory = filesDir.path
+    snapshotPosters = posters
+    reportReady()
+    artworkJob?.cancel()
+    val pending = posters.filter { it.bitmap == null }
+    artworkJob = scope.launch {
+      val local =
+        pending
+          .map { item ->
+            async(cachedArtwork) {
+              preparePosterArt(item.program, artwork, cachedOnly = true)
             }
-          if (signature == next)
-            posters = posters.map {
-              if (it.program.intent == item.program.intent) loaded else it
-            }
-        }
+          }
+          .awaitAll()
+      if (signature != next) return@launch
+      fun publish(loaded: List<PosterArt>) {
+        val byId = loaded.filter { it.bitmap != null }.associateBy { it.program.intent }
+        if (byId.isEmpty()) return
+        posters = posters.map { byId[it.program.intent] ?: it }
+        snapshotPosters = posters
+        reportReady()
       }
+      publish(local)
+      local
+        .filter { it.bitmap == null }
+        .forEach { item ->
+          launch {
+            val loaded = withContext(fetchedArtwork) { preparePosterArt(item.program, artwork) }
+            if (signature == next) publish(listOf(loaded))
+          }
+        }
+    }
+  }
+
+  private fun reportReady() {
+    if (readyReported || !programsKnown || background == null) return
+    val layout = HomeLayout(this)
+    val visible =
+      kotlin.math
+        .ceil((960 - HomeLayout.RowInset).toFloat() / (layout.posterWidth + layout.gap))
+        .toInt()
+    if (posters.take(visible).any { it.bitmap == null && it.program.image.isNotEmpty() }) return
+    readyReported = true
+    val report = Runnable {
+      android.util.Log.i(
+        "AirHome",
+        "HOME_READY_MS=" + (SystemClock.uptimeMillis() - createdAt) + " posters=" + posters.size,
+      )
+    }
+    if (Build.VERSION.SDK_INT >= 29)
+      window.decorView.viewTreeObserver.registerFrameCommitCallback(report)
+    else window.decorView.postOnAnimation(report)
   }
 
   private fun route(value: Intent) {
@@ -281,5 +334,10 @@ class HomeActivity : QuietActivity() {
         colors.put(k, palette.getInt(k).toLong() and 0xffffffffL)
       out.println(prefix + "AIRHOME_PALETTE " + colors)
     }
+  }
+
+  companion object {
+    private var snapshotDirectory = ""
+    private var snapshotPosters = emptyList<PosterArt>()
   }
 }

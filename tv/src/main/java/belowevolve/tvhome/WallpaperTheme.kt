@@ -45,6 +45,9 @@ private constructor(val seed: Int, val colors: IntArray, val imageKey: String = 
   companion object {
     private val extracted = LruCache<String, WallpaperTheme>(24)
 
+    internal fun restore(seed: Int, colors: IntArray, key: String) =
+      WallpaperTheme(seed, colors, key)
+
     fun badgeColor(primary: Int): Int {
       val source = Hct.fromInt(primary)
       return tone(source.hue, if (source.chroma < 5) 0.0 else 36.0, 40.0)

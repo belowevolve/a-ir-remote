@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.database.ContentObserver
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -72,7 +73,7 @@ class ColorKeyService : AccessibilityService() {
                         "Не удалось закрыть заставку. Нажмите «Домой» и повторите.",
                     )
                 }
-            },
+            }
         )
     private val screens: BroadcastReceiver =
         object : BroadcastReceiver() {
@@ -94,10 +95,33 @@ class ColorKeyService : AccessibilityService() {
         }
 
     private var lastVisible: String? = ""
+    private val bindings = HashMap<Int, String>()
+    private val bindingChanges =
+        object : ContentObserver(main) {
+            override fun onChange(selfChange: Boolean) {
+                reloadBindings()
+            }
+        }
+
+    private fun reloadBindings() {
+        runCatching {
+            val snapshot =
+                requireNotNull(contentResolver.call(Actions.bindingsUri, "bindings", null, null))
+            for (key in 183..186) {
+                snapshot.getString(key.toString())?.let { bindings[key] = it }
+            }
+        }
+            .onFailure {
+                if (bindings.isEmpty())
+                    for (key in 183..186) bindings[key] = Actions.binding(this, key)
+                android.util.Log.w("AirKeys", "Bindings unavailable")
+            }
+    }
 
     protected override fun onServiceConnected() {
         super.onServiceConnected()
         if (!tracing) {
+            contentResolver.registerContentObserver(Actions.bindingsUri, false, bindingChanges)
             val filter: IntentFilter = IntentFilter(Intent.ACTION_SCREEN_ON)
             filter.addAction(Intent.ACTION_SCREEN_OFF)
             filter.addAction(Intent.ACTION_DREAMING_STARTED)
@@ -107,6 +131,7 @@ class ColorKeyService : AccessibilityService() {
             else registerReceiver(screens, filter)
             tracing = true
         }
+        reloadBindings()
         dreamPackages.clear()
         dreamPackages.add("com.google.android.backdrop")
         try {
@@ -133,6 +158,7 @@ class ColorKeyService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        contentResolver.unregisterContentObserver(bindingChanges)
         shortcuts.reset()
         if (debugKeys != null) unregisterReceiver(debugKeys)
         debugKeys = null
@@ -183,7 +209,7 @@ class ColorKeyService : AccessibilityService() {
     }
 
     @android.annotation.SuppressLint(
-        "UnspecifiedRegisterReceiverFlag",
+        "UnspecifiedRegisterReceiverFlag"
     ) // Explicit flags on API 33+; DUMP guards both paths.
     private fun registerDebugKeys() {
         // Shell-injected key events can bypass the accessibility filter. Only debuggable builds
@@ -203,7 +229,7 @@ class ColorKeyService : AccessibilityService() {
                     val up: Boolean = onKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0))
                     setResultCode(if (down && up) 1 else 0)
                     setResultData(
-                        if (down && up) "delivered_to_bound_service" else "unbound_shortcut",
+                        if (down && up) "delivered_to_bound_service" else "unbound_shortcut"
                     )
                 }
             }
@@ -223,7 +249,7 @@ class ColorKeyService : AccessibilityService() {
         val k: Int = e.getKeyCode()
         val action: String
         if (k == KeyEvent.KEYCODE_TV_INPUT) action = "inputs"
-        else if (k >= 183 && k <= 186) action = Actions.binding(this, k)
+        else if (k >= 183 && k <= 186) action = bindings[k] ?: "none"
         else {
             if (
                 e.getAction() == KeyEvent.ACTION_DOWN &&
@@ -253,5 +279,15 @@ class ColorKeyService : AccessibilityService() {
             key == KeyEvent.KEYCODE_ENTER ||
             key == KeyEvent.KEYCODE_NUMPAD_ENTER ||
             key == KeyEvent.KEYCODE_ESCAPE)
+    }
+
+    override fun dump(
+        fd: java.io.FileDescriptor?,
+        writer: java.io.PrintWriter,
+        args: Array<out String>?,
+    ) {
+        super.dump(fd, writer, args)
+        WakeTrace.dump(this, "", writer)
+        writer.println("AIRHOME_BINDINGS " + bindings)
     }
 }
