@@ -6,6 +6,8 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
 
 /** Compose owns D-pad traversal; keep the launcher and the embedded TvView silent. */
 open class QuietActivity : ComponentActivity() {
@@ -19,6 +21,10 @@ open class QuietActivity : ComponentActivity() {
                 }
             },
         )
+    }
+
+    protected fun setLauncherContent(content: @Composable () -> Unit) {
+        setContent { LauncherSemantics(content) }
     }
 
     open fun onRemoteBack() {

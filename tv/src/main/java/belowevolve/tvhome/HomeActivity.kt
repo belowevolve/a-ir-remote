@@ -7,7 +7,6 @@ import android.media.tv.TvContract
 import android.net.*
 import android.os.*
 import android.view.KeyEvent
-import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import java.io.FileDescriptor
 import java.io.PrintWriter
@@ -99,7 +98,7 @@ class HomeActivity : QuietActivity() {
       posters = snapshotPosters
       programsKnown = posters.isNotEmpty()
     }
-    setContent {
+    setLauncherContent {
       HomeTheme(theme) {
         HomeContent(
           background,

@@ -6,7 +6,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.view.KeyEvent
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -28,7 +27,7 @@ class SettingsActivity : QuietActivity() {
     super.onCreate(state)
     Ui.fullscreen(this)
     route()
-    setContent { HomeTheme { SettingsScreen() } }
+    setLauncherContent { HomeTheme { SettingsScreen() } }
   }
 
   override fun onNewIntent(value: Intent) {

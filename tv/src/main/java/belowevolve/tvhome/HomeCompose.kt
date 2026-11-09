@@ -576,7 +576,8 @@ internal fun HomeContent(
 
 private data class Caption(val title: String, val details: String)
 
-private class CaptionLayer(val caption: Caption, initialOpacity: Float) {
+private class CaptionLayer(initialCaption: Caption, initialOpacity: Float) {
+  var caption by mutableStateOf(initialCaption)
   val opacity = Animatable(initialOpacity)
 }
 
@@ -590,18 +591,24 @@ private fun HomeCaption(target: Caption, layout: HomeLayout, modifier: Modifier)
     CaptionContent(target, layout, accessible)
     return
   }
-  val layers = remember { mutableStateListOf(CaptionLayer(target, 1f)) }
+  // Keep both text trees alive. Creating/removing a Text subtree on every focus change
+  // caused frequent ART collections and visible suspension pauses on the TV.
+  val layers = remember { listOf(CaptionLayer(target, 1f), CaptionLayer(target, 0f)) }
   LaunchedEffect(target) {
     val incoming =
-      layers.firstOrNull { it.caption == target }
-        ?: CaptionLayer(target, 0f).also { layers.add(it) }
+      layers.filter { it.caption == target }.maxByOrNull { it.opacity.value }
+        ?: layers
+          .minBy { it.opacity.value }
+          .also {
+            it.opacity.snapTo(0f)
+            it.caption = target
+          }
     kotlinx.coroutines.coroutineScope {
-      layers.toList().forEach { layer ->
+      layers.forEach { layer ->
         launch {
           val to = if (layer === incoming) 1f else 0f
           if (layer.opacity.value != to)
             layer.opacity.animateTo(to, tween(120, easing = LinearEasing))
-          if (layer !== incoming) layers.remove(layer)
         }
       }
     }

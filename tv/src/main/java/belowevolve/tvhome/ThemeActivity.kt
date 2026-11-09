@@ -2,7 +2,6 @@ package belowevolve.tvhome
 
 import android.os.Bundle
 import android.view.KeyEvent
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,7 +23,7 @@ class ThemeActivity : QuietActivity() {
   override fun onCreate(state: Bundle?) {
     super.onCreate(state)
     Ui.fullscreen(this)
-    setContent { HomeTheme { ThemeScreen() } }
+    setLauncherContent { HomeTheme { ThemeScreen() } }
   }
 
   @Composable
