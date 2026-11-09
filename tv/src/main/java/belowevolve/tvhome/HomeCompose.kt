@@ -15,7 +15,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
@@ -175,10 +178,11 @@ internal fun FocusFirst(modifier: Modifier = Modifier, content: @Composable (Mod
 internal fun rememberTvRowFocusSpec(
   step: Int = HomeLayout.RowStep,
   motion: Int? = null,
+  focusSlot: Int = 2,
 ): BringIntoViewSpec {
   val anchor =
     with(LocalDensity.current) {
-      (HomeLayout.RowInset + 2 * step).dp.toPx()
+      (HomeLayout.RowInset + focusSlot * step).dp.toPx()
     }
   return remember(anchor, motion) {
     object : BringIntoViewSpec {
@@ -216,6 +220,7 @@ internal fun PosterBadgesContent(
   val circle = remember(season, mark, format) { PosterBadgeSpec.circleSeason(season, mark, format) }
   val news = metadata.optString("news")
   val lineHeight = with(LocalDensity.current) { PosterBadgeSpec.LINE_SP.sp.toDp() }
+  val circleColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .65f)
   val badgeStyle =
     TextStyle(
       fontSize = PosterBadgeSpec.TEXT_SP.sp,
@@ -237,22 +242,25 @@ internal fun PosterBadgesContent(
     ) {
       if (season.isNotEmpty()) {
         Box(
-          Modifier.size(lineHeight)
-            .border(
-              1.dp,
-              MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .65f),
-              CircleShape,
-            ),
+          Modifier.height(lineHeight)
+            .widthIn(min = lineHeight)
+            .drawBehind {
+              // Use the badge's existing vertical padding for the outline, not smaller type.
+              val outset = 1.dp.toPx()
+              drawOval(
+                color = circleColor,
+                topLeft = Offset(-outset, -outset),
+                size = Size(size.width + 2 * outset, size.height + 2 * outset),
+                style = Stroke(1.dp.toPx()),
+              )
+            }
+            .padding(horizontal = 1.dp),
           contentAlignment = Alignment.Center,
         ) {
           Text(
             season,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
-            style =
-              badgeStyle.copy(
-                fontSize = (10 - season.length).coerceAtLeast(5).sp,
-                letterSpacing = 0.sp,
-              ),
+            style = badgeStyle,
             maxLines = 1,
             softWrap = false,
           )
@@ -449,7 +457,8 @@ internal fun HomeContent(
   var selected by remember { mutableIntStateOf(0) }
   val row = rememberScrollState()
   val density = LocalDensity.current
-  val rowFocus = rememberTvRowFocusSpec(layout.posterWidth + layout.gap, layout.motion)
+  val rowFocus =
+    rememberTvRowFocusSpec(layout.posterWidth + layout.gap, layout.motion, layout.focusSlot)
   val posterFocus =
     remember(posters.map { it.program.intent }) {
       posters.map { FocusRequester() }
@@ -466,7 +475,7 @@ internal fun HomeContent(
   val appsFocus = remember { FocusRequester() }
   var previewActive by remember { mutableStateOf(true) }
   val inputMode = LocalInputModeManager.current
-  LaunchedEffect(focusRequest, posters.size) {
+  LaunchedEffect(focusRequest, posters.size, layout.scrollMode, layout.posterWidth, layout.gap) {
     if (preview && focusRequest > 0) {
       previewActive = false
       delay(CardMotion.duration(layout.motion, false).toLong())
@@ -477,7 +486,11 @@ internal fun HomeContent(
       if (posters.isNotEmpty()) {
         selected = selected.coerceAtMost(posters.lastIndex)
         row.scrollTo(
-          with(density) { (selected * (layout.posterWidth + layout.gap)).dp.roundToPx() }
+          with(density) {
+            ((selected - layout.focusSlot).coerceAtLeast(0) * (layout.posterWidth + layout.gap))
+              .dp
+              .roundToPx()
+          }
         )
         withFrameNanos {}
         posterFocus[selected].requestFocus()
@@ -772,6 +785,8 @@ private fun PosterShelf(
         )
       }
     }
+    if (layout.scrollMode == 1 && posters.isNotEmpty())
+      Spacer(Modifier.width(HomeLayout.firstPositionTail(layout.posterWidth, layout.gap).dp))
   }
 }
 

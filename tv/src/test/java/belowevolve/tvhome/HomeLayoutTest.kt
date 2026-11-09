@@ -7,6 +7,19 @@ import org.junit.Test
 
 class HomeLayoutTest {
   @Test
+  fun firstPositionModeHasEnoughRoomToAnchorTheLastCard() {
+    for (size in 0..2) for (gap in 8..32 step 4) for (count in 1..16) {
+      val width = HomeLayout.cardWidth(size, gap)
+      val content =
+        2 * HomeLayout.RowInset +
+          count * width +
+          count * gap +
+          HomeLayout.firstPositionTail(width, gap)
+      assertEquals((count - 1) * (width + gap), content - 960)
+    }
+  }
+
+  @Test
   fun keepsCurrentDefaults() {
     assertEquals(132, HomeLayout.cardWidth(1, 12))
   }

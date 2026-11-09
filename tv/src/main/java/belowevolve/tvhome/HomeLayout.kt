@@ -12,6 +12,8 @@ class HomeLayout(c: Context) {
   val posterTop: Int
   val captionStyle: Int
   val motion: Int
+  val scrollMode: Int
+  val focusSlot: Int
   val gap: Int
   val size: Int
   val posterWidth: Int
@@ -31,6 +33,8 @@ class HomeLayout(c: Context) {
   init {
     val p: SharedPreferences = c.getSharedPreferences("appearance", 0)
     mode = clamp(p.getInt("layout", 0), 0, 1)
+    scrollMode = clamp(p.getInt("poster_scroll", 0), 0, SCROLL_MODES.lastIndex)
+    focusSlot = if (scrollMode == 1) 0 else 2
     gap = clamp(p.getInt("poster_gap", PosterGap), 8, 32)
     size = clamp(p.getInt("poster_size", 1), 0, 2)
     posterWidth = cardWidth(size, gap)
@@ -82,6 +86,7 @@ class HomeLayout(c: Context) {
     const val MaxPosterHeight = MaxPosterWidth * 3 / 2
     val SIZES = arrayOf("Компактные", "Средние", "Крупные")
     val BADGE_VISIBILITY = arrayOf("Все", "Только новые", "Скрывать")
+    val SCROLL_MODES = arrayOf("По ленте", "Выбранная слева")
     val NAMES: Array<String> = arrayOf<String>("Лента по центру", "Нижняя полка")
     val CAPTION_IDS: IntArray = intArrayOf(0, 1, 4, 3)
     val CAPTIONS: Array<String> =
@@ -89,6 +94,10 @@ class HomeLayout(c: Context) {
     val MOTIONS: Array<String> = CardMotion.NAMES
 
     fun posterCorner(width: Int) = CornerRadius * width / PosterWidth
+
+    // Row adds its normal item gap before this final spacer too.
+    fun firstPositionTail(width: Int, gap: Int) =
+      (960 - 2 * RowInset - width - gap).coerceAtLeast(0)
 
     fun posterBadgeInset(width: Int) =
       maxOf(4f, posterCorner(width) - belowevolve.shared.design.PosterBadgeSpec.CORNER_DP)

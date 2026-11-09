@@ -121,6 +121,15 @@ class ThemeActivity : QuietActivity() {
             }
 
             TvAction(
+              "Прокрутка",
+              Modifier.fillMaxWidth(),
+              trailingText = HomeLayout.SCROLL_MODES[layout.scrollMode],
+            ) {
+              set("poster_scroll", (layout.scrollMode + 1) % HomeLayout.SCROLL_MODES.size)
+              motionPreview++
+            }
+
+            TvAction(
               "Бейджи на главной",
               Modifier.fillMaxWidth(),
               trailingText = HomeLayout.BADGE_VISIBILITY[layout.badgeVisibility],
