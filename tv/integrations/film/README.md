@@ -21,11 +21,11 @@ Java-файлы здесь — автономные адаптеры для java
 
 ## Компактные бейджи
 
-`patch_badges.py` добавляет круг вокруг номера сезона и подпись «5 серия». Шрифт и размеры совпадают с Air Home и заданы в `shared/PosterBadgeSpec`. Сохраняются подпись, ресурсы и данные приложения.
+`patch_badges.py` добавляет формат «Плашка сезона»: номер сезона на светлом левом сегменте во всю высоту бейджа, затем подпись «5 серия» с отступами. Шрифт и размеры совпадают с Air Home и заданы в `shared/PosterBadgeSpec`. Сохраняются подпись, ресурсы и данные приложения.
 
 ```sh
 python3 tv/integrations/film/patch_badges.py /path/to/film.apk \
-  --output artifacts/film-circle.apk
+  --output artifacts/film-season-tag.apk
 ```
 
 Если адаптера в APK ещё нет, добавьте `--apktool /path/to/apktool.jar`. При повторном применении заменяется только DEX адаптера.

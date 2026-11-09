@@ -2,7 +2,6 @@ package mov.film;
 
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.InsetDrawable;
 import android.os.Build;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -20,9 +19,7 @@ public final class PosterBadgeStyle {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setClipChildren(false);
-        row.setPadding(dp(context, 3), dp(context, PosterBadgeSpec.PADDING_Y_DP),
-            dp(context, 2), dp(context, PosterBadgeSpec.PADDING_Y_DP));
+        row.setBaselineAligned(false);
         GradientDrawable background = new GradientDrawable();
         background.setColor(DynamicTheme.color(0xff8b5cf6));
         background.setCornerRadius(dp(context, PosterBadgeSpec.CORNER_DP));
@@ -40,10 +37,13 @@ public final class PosterBadgeStyle {
         view.setGravity(view instanceof SeasonText ? Gravity.CENTER : Gravity.CENTER_VERTICAL);
         view.setEllipsize(TextUtils.TruncateAt.END);
         int line = sp(view.getContext(), PosterBadgeSpec.LINE_SP);
-        view.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, line));
+        int height = badgeHeight(view.getContext());
+        view.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, height));
+        int horizontal = dp(view.getContext(), view instanceof SeasonText ? 4 : PosterBadgeSpec.PADDING_X_DP);
+        int vertical = dp(view.getContext(), PosterBadgeSpec.PADDING_Y_DP);
+        view.setPadding(horizontal, vertical, horizontal, vertical);
         if (view instanceof SeasonText) {
-            view.setMinWidth(line);
-            view.setPadding(dp(view.getContext(), 1), 0, dp(view.getContext(), 1), 0);
+            view.setMinWidth(height);
         }
         if (Build.VERSION.SDK_INT >= 28) view.setLineHeight(line);
         return view;
@@ -57,49 +57,26 @@ public final class PosterBadgeStyle {
         return Math.round(value * context.getResources().getDisplayMetrics().scaledDensity);
     }
 
-    private static void spacing(TextView child) {
-        if (!(child.getParent() instanceof LinearLayout)) return;
-        LinearLayout row = (LinearLayout) child.getParent();
-        if (row.getChildCount() != 2) return;
-        TextView season = (TextView) row.getChildAt(0);
-        TextView episode = (TextView) row.getChildAt(1);
-        boolean prefix = season.length() > 0;
-        SeasonText number = (SeasonText) season;
-        season.setBackground(number.numbered ? number.ring : null);
-        season.setPadding(dp(child.getContext(), 1), 0, dp(child.getContext(), 1), 0);
-        row.setPadding(dp(child.getContext(), prefix ? 3 : PosterBadgeSpec.PADDING_X_DP),
-            dp(child.getContext(), PosterBadgeSpec.PADDING_Y_DP),
-            dp(child.getContext(), prefix ? (episode.length() > 0 ? 2 : 3) : PosterBadgeSpec.PADDING_X_DP),
-            dp(child.getContext(), PosterBadgeSpec.PADDING_Y_DP));
-        LinearLayout.LayoutParams layout = (LinearLayout.LayoutParams) season.getLayoutParams();
-        int gap = prefix && episode.length() > 0 ? dp(child.getContext(), 4) : 0;
-        if (layout.getMarginEnd() != gap) {
-            layout.setMarginEnd(gap);
-            season.setLayoutParams(layout);
-        }
+    private static int badgeHeight(Context context) {
+        return sp(context, PosterBadgeSpec.LINE_SP) + 2 * dp(context, PosterBadgeSpec.PADDING_Y_DP);
     }
 
     public static final class SeasonText extends TextView {
-        private final InsetDrawable ring;
-        private boolean numbered;
         public SeasonText(Context context) {
             super(context);
-            GradientDrawable outline = new GradientDrawable();
-            outline.setShape(GradientDrawable.OVAL);
-            outline.setColor(android.graphics.Color.TRANSPARENT);
-            outline.setStroke(dp(context, 1), 0xa6ffffff);
-            // The outline uses the row's padding without shrinking the season's text.
-            ring = new InsetDrawable(outline, -dp(context, 1));
+            GradientDrawable surface = new GradientDrawable();
+            surface.setColor(0x33ffffff);
+            float corner = dp(context, PosterBadgeSpec.CORNER_DP);
+            surface.setCornerRadii(new float[] {corner, corner, 0, 0, 0, 0, corner, corner});
+            setBackground(surface);
         }
         @Override public void setText(CharSequence value, BufferType type) {
             String raw = value == null ? "" : value.toString().trim();
             String number = PosterBadgeSpec.seasonNumber(raw);
-            numbered = !number.isEmpty();
-            super.setText(numbered ? number : raw, type);
-            spacing(this);
+            super.setText(number.isEmpty() ? raw : number, type);
         }
         @Override protected void onMeasure(int width, int height) {
-            if (length() == 0) setMeasuredDimension(0, sp(getContext(), PosterBadgeSpec.LINE_SP));
+            if (length() == 0) setMeasuredDimension(0, badgeHeight(getContext()));
             else super.onMeasure(width, height);
         }
     }
@@ -108,7 +85,10 @@ public final class PosterBadgeStyle {
         public EpisodeText(Context context) { super(context); }
         @Override public void setText(CharSequence value, BufferType type) {
             super.setText(PosterBadgeSpec.episodeLabel(value == null ? "" : value.toString()), type);
-            spacing(this);
+        }
+        @Override protected void onMeasure(int width, int height) {
+            if (length() == 0) setMeasuredDimension(0, badgeHeight(getContext()));
+            else super.onMeasure(width, height);
         }
     }
 }

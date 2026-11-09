@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply Air Home's circular season badge to an existing, locally signed film.mov APK."""
+"""Apply Air Home's season-segment badge to an existing, locally signed film.mov APK."""
 import argparse
 import os
 from pathlib import Path
