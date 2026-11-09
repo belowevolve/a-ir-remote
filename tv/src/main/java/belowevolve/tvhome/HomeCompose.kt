@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.*
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
@@ -236,6 +235,7 @@ internal fun PosterBadgesContent(
   @Composable
   fun chip(text: String, season: String = "", decorated: Boolean = false) {
     val outlined = decorated && format == PosterBadgeSpec.OUTLINE
+    val seasonTag = season.isNotEmpty() && format == PosterBadgeSpec.SEASON_TAG
     val shape = RoundedCornerShape(PosterBadgeSpec.CORNER_DP.dp)
     Row(
       Modifier.height(lineHeight + (2 * PosterBadgeSpec.PADDING_Y_DP).dp)
@@ -245,15 +245,35 @@ internal fun PosterBadgesContent(
           shape,
         )
         .then(if (outlined) Modifier.border(1.dp, circleColor, shape) else Modifier)
-        .padding(
-          start = if (season.isNotEmpty()) 3.dp else PosterBadgeSpec.PADDING_X_DP.dp,
-          end = if (season.isNotEmpty()) 2.dp else PosterBadgeSpec.PADDING_X_DP.dp,
-          top = PosterBadgeSpec.PADDING_Y_DP.dp,
-          bottom = PosterBadgeSpec.PADDING_Y_DP.dp,
+        .then(
+          if (seasonTag) Modifier.clip(shape)
+          else
+            Modifier.padding(
+              start = if (season.isNotEmpty()) 3.dp else PosterBadgeSpec.PADDING_X_DP.dp,
+              end = if (season.isNotEmpty()) 2.dp else PosterBadgeSpec.PADDING_X_DP.dp,
+              top = PosterBadgeSpec.PADDING_Y_DP.dp,
+              bottom = PosterBadgeSpec.PADDING_Y_DP.dp,
+            )
         ),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      if (season.isNotEmpty()) {
+      if (seasonTag) {
+        Box(
+          Modifier.fillMaxHeight()
+            .widthIn(min = lineHeight + (2 * PosterBadgeSpec.PADDING_Y_DP).dp)
+            .background(circleColor.copy(alpha = .2f))
+            .padding(horizontal = 4.dp),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            season,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            style = badgeStyle,
+            maxLines = 1,
+            softWrap = false,
+          )
+        }
+      } else if (season.isNotEmpty()) {
         Box(
           Modifier.height(lineHeight)
             .widthIn(min = lineHeight)
@@ -265,13 +285,6 @@ internal fun PosterBadgesContent(
               when (format) {
                 PosterBadgeSpec.FILLED_CIRCLE ->
                   drawOval(circleColor.copy(alpha = 1f), origin, bounds)
-                PosterBadgeSpec.SEASON_TAG ->
-                  drawRoundRect(
-                    circleColor.copy(alpha = .2f),
-                    origin,
-                    bounds,
-                    CornerRadius(3.dp.toPx()),
-                  )
                 else -> drawOval(circleColor, origin, bounds, style = Stroke(1.dp.toPx()))
               }
             }
@@ -293,6 +306,13 @@ internal fun PosterBadgesContent(
       }
       Text(
         text,
+        modifier =
+          if (seasonTag)
+            Modifier.padding(
+              horizontal = PosterBadgeSpec.PADDING_X_DP.dp,
+              vertical = PosterBadgeSpec.PADDING_Y_DP.dp,
+            )
+          else Modifier,
         color = MaterialTheme.colorScheme.onPrimaryContainer,
         style = badgeStyle,
         maxLines = 1,

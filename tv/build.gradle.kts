@@ -12,8 +12,8 @@ android {
         applicationId = "belowevolve.tvhome"
         minSdk = 28
         targetSdk = 34
-        versionCode = 45
-        versionName = "0.41.0"
+        versionCode = 46
+        versionName = "0.42.0"
         testInstrumentationRunner = "belowevolve.tvhome.LauncherRegressionRunner"
     }
 
