@@ -160,12 +160,14 @@ class HomeActivity : QuietActivity() {
     reportReady()
     artworkJob?.cancel()
     val pending = posters.filter { it.bitmap == null }
+    val backdrop = BackdropStyle(this)
+    val shadowStyle = HomeLayout(this).shadowStyle(backdrop.mode == 2 && backdrop.mat == 1)
     artworkJob = scope.launch {
       val local =
         pending
           .map { item ->
             async(cachedArtwork) {
-              preparePosterArt(item.program, artwork, cachedOnly = true)
+              preparePosterArt(item.program, artwork, cachedOnly = true, shadowStyle = shadowStyle)
             }
           }
           .awaitAll()
@@ -182,7 +184,10 @@ class HomeActivity : QuietActivity() {
         .filter { it.bitmap == null }
         .forEach { item ->
           launch {
-            val loaded = withContext(fetchedArtwork) { preparePosterArt(item.program, artwork) }
+            val loaded =
+              withContext(fetchedArtwork) {
+                preparePosterArt(item.program, artwork, shadowStyle = shadowStyle)
+              }
             if (signature == next) publish(listOf(loaded))
           }
         }

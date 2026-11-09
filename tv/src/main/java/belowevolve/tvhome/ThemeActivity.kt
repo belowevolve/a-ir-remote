@@ -147,7 +147,7 @@ class ThemeActivity : QuietActivity() {
                   belowevolve.shared.design.PosterBadgeSpec.FORMATS[layout.badgeFormat],
               ) {
                 set(
-                  "poster_badge_format",
+                  "poster_badge_style",
                   (layout.badgeFormat + 1) % belowevolve.shared.design.PosterBadgeSpec.FORMATS.size,
                 )
               }
@@ -172,6 +172,29 @@ class ThemeActivity : QuietActivity() {
 
             if (layout.shadow != PosterShadow.None)
               ThemeSlider("Сила тени карточек", "poster_glow", layout.glow, 0, 100, 5, ::set)
+
+            if (layout.shadow == 0) {
+              ThemeSlider(
+                "Тень: левее / правее",
+                "volume_shadow_x",
+                layout.shadowX,
+                -32,
+                32,
+                2,
+                ::set,
+              )
+              ThemeSlider("Тень: выше / ниже", "volume_shadow_y", layout.shadowY, -32, 40, 1, ::set)
+              ThemeSlider(
+                "Размер тени (%)",
+                "volume_shadow_size",
+                layout.shadowSize,
+                70,
+                140,
+                5,
+                ::set,
+              )
+              ThemeSlider("Размытие тени", "volume_shadow_blur", layout.shadowBlur, 2, 24, 1, ::set)
+            }
 
             TvAction(
               "Обработка фона",

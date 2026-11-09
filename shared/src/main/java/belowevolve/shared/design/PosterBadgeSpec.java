@@ -12,12 +12,12 @@ public final class PosterBadgeSpec {
     public static final int CORNER_DP = 6;
     public static final int CIRCLE = 0;
     public static final int EPISODE = 1;
-    public static final int LOWERCASE = 2;
-    public static final int UPPERCASE = 3;
-    public static final int MULTIPLY = 4;
-    public static final int PADDED_MULTIPLY = 5;
+    public static final int FILLED_CIRCLE = 2;
+    public static final int SEASON_TAG = 3;
+    public static final int FULL = 4;
+    public static final int OUTLINE = 5;
     public static final String[] FORMATS = {
-        "⑤ 1 серия", "1 серия", "s01e01", "S01E01", "5×05", "05×05"
+        "Круг", "Только серия", "Залитый круг", "Плашка сезона", "Сезон и серия", "Контурный"
     };
 
     private static final Pattern SEASON_NUMBER = Pattern.compile(
@@ -48,25 +48,16 @@ public final class PosterBadgeSpec {
         return number.isEmpty() ? clean(value) : number + " серия";
     }
 
-    /** The circle is rendered separately, inside the existing text line height. */
-    public static String circleSeason(String season, String episode, int format) {
-        return format == CIRCLE && !episodeLabel(episode).isEmpty() ? seasonNumber(season) : "";
+    /** Decorative prefixes keep the normal badge text size and line height. */
+    public static String seasonPrefix(String season, String episode, int format) {
+        boolean prefix = format == CIRCLE || format == FILLED_CIRCLE || format == SEASON_TAG;
+        return prefix && !episodeLabel(episode).isEmpty() ? seasonNumber(season) : "";
     }
 
     public static String format(String season, String episode, int format) {
-        String s = seasonNumber(season);
-        String e = episodeNumber(episode);
         String label = episodeLabel(episode);
         if (format == EPISODE) return label;
-        if (format == CIRCLE && !s.isEmpty() && !label.isEmpty()) return label;
-        if (!s.isEmpty() && !e.isEmpty()) {
-            switch (format) {
-                case LOWERCASE: return "s" + padded(s) + "e" + padded(e);
-                case UPPERCASE: return "S" + padded(s) + "E" + padded(e);
-                case MULTIPLY: return s + "×" + padded(e);
-                case PADDED_MULTIPLY: return padded(s) + "×" + padded(e);
-            }
-        }
+        if (!seasonPrefix(season, episode, format).isEmpty()) return label;
         String first = seasonLabel(season);
         return first.isEmpty() ? label : label.isEmpty() ? first : first + " · " + label;
     }
@@ -80,6 +71,5 @@ public final class PosterBadgeSpec {
         return number.substring(start);
     }
 
-    private static String padded(String number) { return number.length() < 2 ? "0" + number : number; }
     private static String clean(String value) { return value == null ? "" : value.trim(); }
 }

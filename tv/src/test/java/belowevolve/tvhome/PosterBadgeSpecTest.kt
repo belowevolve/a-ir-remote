@@ -23,21 +23,28 @@ class PosterBadgeSpecTest {
 
   @Test
   fun formatsSeasonAndEpisodeWithoutInventingMissingNumbers() {
-    val expected = listOf("7 серия", "7 серия", "s07e07", "S07E07", "7×07", "07×07")
+    val expected =
+      listOf("7 серия", "7 серия", "7 серия", "7 серия", "7 сезон · 7 серия", "7 сезон · 7 серия")
     expected.forEachIndexed { format, value ->
       assertEquals(value, PosterBadgeSpec.format("Сезон 07", "Серия 07", format))
     }
-    assertEquals("7", PosterBadgeSpec.circleSeason("Сезон 07", "Серия 07", PosterBadgeSpec.CIRCLE))
-    assertEquals("", PosterBadgeSpec.circleSeason("7", "7 серия", PosterBadgeSpec.EPISODE))
-    assertEquals("0×05", PosterBadgeSpec.format("0", "5", PosterBadgeSpec.MULTIPLY))
-    assertEquals("12×105", PosterBadgeSpec.format("12", "105", PosterBadgeSpec.MULTIPLY))
+    assertEquals("7", PosterBadgeSpec.seasonPrefix("Сезон 07", "Серия 07", PosterBadgeSpec.CIRCLE))
+    assertEquals("", PosterBadgeSpec.seasonPrefix("7", "7 серия", PosterBadgeSpec.EPISODE))
+    assertEquals("0 сезон · 5 серия", PosterBadgeSpec.format("0", "5", PosterBadgeSpec.FULL))
+    assertEquals("12 сезон · 105 серия", PosterBadgeSpec.format("12", "105", PosterBadgeSpec.FULL))
+    for (style in
+      listOf(
+        PosterBadgeSpec.CIRCLE,
+        PosterBadgeSpec.FILLED_CIRCLE,
+        PosterBadgeSpec.SEASON_TAG,
+      )) assertEquals("7", PosterBadgeSpec.seasonPrefix("7", "7 серия", style))
     for (format in 0..5) {
       assertEquals("7 серия", PosterBadgeSpec.format("", "7 серия", format))
       assertEquals("", PosterBadgeSpec.format(null, null, format))
     }
     assertEquals(
       "7 сезон · Спецвыпуск",
-      PosterBadgeSpec.format("7", "Спецвыпуск", PosterBadgeSpec.UPPERCASE),
+      PosterBadgeSpec.format("7", "Спецвыпуск", PosterBadgeSpec.OUTLINE),
     )
   }
 

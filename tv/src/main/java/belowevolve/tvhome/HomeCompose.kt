@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.*
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.zIndex
 import belowevolve.shared.compose.AirButton
 import belowevolve.shared.design.PosterBadgeSpec
 import belowevolve.shared.design.RemoteIcons
@@ -51,10 +53,12 @@ internal fun preparePosterArt(
   program: ProgramRepository.Program,
   store: PosterStore,
   cachedOnly: Boolean = false,
+  shadowStyle: PosterShadow.Style = PosterShadow.Style(),
 ): PosterArt {
   val art = if (cachedOnly) store.loadCachedCard(program.image) else store.loadCard(program.image)
   val accent = Ui.posterAccent(art.bitmap)
-  if (art.bitmap != null) PosterShadow.load(accent, false)
+  if (art.bitmap != null && shadowStyle.kind != PosterShadow.None)
+    PosterShadow.load(accent, shadowStyle)
   return PosterArt(program, art.bitmap, art.separateBadges, accent)
 }
 
@@ -217,7 +221,7 @@ internal fun PosterBadgesContent(
   val season = metadata.optString("season")
   val mark = metadata.optString("mark")
   val episode = remember(season, mark, format) { PosterBadgeSpec.format(season, mark, format) }
-  val circle = remember(season, mark, format) { PosterBadgeSpec.circleSeason(season, mark, format) }
+  val prefix = remember(season, mark, format) { PosterBadgeSpec.seasonPrefix(season, mark, format) }
   val news = metadata.optString("news")
   val lineHeight = with(LocalDensity.current) { PosterBadgeSpec.LINE_SP.sp.toDp() }
   val circleColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .65f)
@@ -230,14 +234,23 @@ internal fun PosterBadgesContent(
       platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
   @Composable
-  fun chip(text: String, season: String = "") {
+  fun chip(text: String, season: String = "", decorated: Boolean = false) {
+    val outlined = decorated && format == PosterBadgeSpec.OUTLINE
+    val shape = RoundedCornerShape(PosterBadgeSpec.CORNER_DP.dp)
     Row(
       Modifier.height(lineHeight + (2 * PosterBadgeSpec.PADDING_Y_DP).dp)
         .background(
-          MaterialTheme.colorScheme.primaryContainer,
-          RoundedCornerShape(PosterBadgeSpec.CORNER_DP.dp),
+          if (outlined) MaterialTheme.colorScheme.surfaceContainer.copy(alpha = .9f)
+          else MaterialTheme.colorScheme.primaryContainer,
+          shape,
         )
-        .padding(PosterBadgeSpec.PADDING_X_DP.dp, PosterBadgeSpec.PADDING_Y_DP.dp),
+        .then(if (outlined) Modifier.border(1.dp, circleColor, shape) else Modifier)
+        .padding(
+          start = if (season.isNotEmpty()) 3.dp else PosterBadgeSpec.PADDING_X_DP.dp,
+          end = if (season.isNotEmpty()) 2.dp else PosterBadgeSpec.PADDING_X_DP.dp,
+          top = PosterBadgeSpec.PADDING_Y_DP.dp,
+          bottom = PosterBadgeSpec.PADDING_Y_DP.dp,
+        ),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       if (season.isNotEmpty()) {
@@ -247,19 +260,30 @@ internal fun PosterBadgesContent(
             .drawBehind {
               // Use the badge's existing vertical padding for the outline, not smaller type.
               val outset = 1.dp.toPx()
-              drawOval(
-                color = circleColor,
-                topLeft = Offset(-outset, -outset),
-                size = Size(size.width + 2 * outset, size.height + 2 * outset),
-                style = Stroke(1.dp.toPx()),
-              )
+              val origin = Offset(-outset, -outset)
+              val bounds = Size(size.width + 2 * outset, size.height + 2 * outset)
+              when (format) {
+                PosterBadgeSpec.FILLED_CIRCLE ->
+                  drawOval(circleColor.copy(alpha = 1f), origin, bounds)
+                PosterBadgeSpec.SEASON_TAG ->
+                  drawRoundRect(
+                    circleColor.copy(alpha = .2f),
+                    origin,
+                    bounds,
+                    CornerRadius(3.dp.toPx()),
+                  )
+                else -> drawOval(circleColor, origin, bounds, style = Stroke(1.dp.toPx()))
+              }
             }
             .padding(horizontal = 1.dp),
           contentAlignment = Alignment.Center,
         ) {
           Text(
             season,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            color =
+              if (format == PosterBadgeSpec.FILLED_CIRCLE)
+                MaterialTheme.colorScheme.primaryContainer
+              else MaterialTheme.colorScheme.onPrimaryContainer,
             style = badgeStyle,
             maxLines = 1,
             softWrap = false,
@@ -278,7 +302,7 @@ internal fun PosterBadgesContent(
   }
   Box(modifier.padding(inset.dp)) {
     if (showEpisode && episode.isNotEmpty())
-      Box(Modifier.align(Alignment.TopStart)) { chip(episode, circle) }
+      Box(Modifier.align(Alignment.TopStart)) { chip(episode, prefix, decorated = true) }
     if (showNews && news.isNotEmpty()) Box(Modifier.align(Alignment.BottomEnd)) { chip(news) }
   }
 }
@@ -315,23 +339,29 @@ internal fun PosterCard(
     }
   val image = art.bitmap
   val wide = style.mode == 2 && style.mat == 1
+  val shadowStyle =
+    remember(layout.shadow, wide, layout.shadowSize, layout.shadowBlur) { layout.shadowStyle(wide) }
+  val shadowX = if (layout.shadow == 0) layout.shadowX else 0
+  val shadowY = if (layout.shadow == 0) layout.shadowY - PosterShadow.DefaultY else 0
   val shadow by
     produceState(
-      PosterShadow.cached(art.accent, wide, layout.shadow),
+      PosterShadow.cached(art.accent, shadowStyle),
       art.accent,
-      wide,
-      layout.shadow,
+      shadowStyle,
+      preview,
+      previewFocused,
     ) {
+      if (preview && !previewFocused) return@produceState
       value =
         if (layout.shadow == PosterShadow.None) null
-        else withContext(Dispatchers.Default) { PosterShadow.load(art.accent, wide, layout.shadow) }
+        else withContext(Dispatchers.Default) { PosterShadow.load(art.accent, shadowStyle) }
     }
   val baseShadow by
-    produceState<PosterShadow.Mask?>(null, style.mode, style.mat, layout.shadow) {
+    produceState<PosterShadow.Mask?>(null, style.mode, style.mat, shadowStyle) {
       value =
         if (style.mode == 2 && style.mat != 2 && layout.shadow != PosterShadow.None)
           withContext(Dispatchers.Default) {
-            PosterShadow.load(android.graphics.Color.BLACK, wide, layout.shadow)
+            PosterShadow.load(android.graphics.Color.BLACK, shadowStyle)
           }
         else null
     }
@@ -378,6 +408,8 @@ internal fun PosterCard(
         layout.glow,
         { baseOpacity * (1f - progress) },
         Modifier.matchParentSize(),
+        shadowX,
+        shadowY,
       )
       PosterGlow(
         shadow,
@@ -387,6 +419,8 @@ internal fun PosterCard(
           else progress
         },
         Modifier.matchParentSize(),
+        shadowX,
+        shadowY,
       )
       Box(
         Modifier.matchParentSize().background(MaterialTheme.colorScheme.surfaceContainer, shape)
@@ -419,12 +453,16 @@ private fun PosterGlow(
   strength: Int,
   opacity: () -> Float,
   modifier: Modifier,
+  offsetX: Int = 0,
+  offsetY: Int = 0,
 ) {
   if (mask == null || strength == 0) return
   Spacer(
     modifier
       .graphicsLayer {
         alpha = opacity() * strength / 100f
+        translationX = offsetX.dp.toPx()
+        translationY = offsetY.dp.toPx()
         compositingStrategy = CompositingStrategy.ModulateAlpha
       }
       .drawBehind {
@@ -523,6 +561,7 @@ internal fun HomeContent(
       )
     Row(
       Modifier.align(Alignment.TopEnd)
+        .zIndex(1f)
         .padding(top = 20.dp, end = 32.dp)
         .height(48.dp)
         .graphicsLayer(),
@@ -756,12 +795,25 @@ private fun PosterShelf(
   onFocus: (Int) -> Unit,
 ) {
   val context = LocalContext.current
+  val shadowStyle = layout.shadowStyle(style.mode == 2 && style.mat == 1)
+  val extent =
+    if (layout.shadow == PosterShadow.None) 0f
+    else PosterShadow.inset(shadowStyle) * layout.posterWidth.toFloat() / HomeLayout.PosterWidth
+  val shift = if (layout.shadow == 0) kotlin.math.abs(layout.shadowY - PosterShadow.DefaultY) else 0
+  val padding =
+    maxOf(
+      16,
+      kotlin.math
+        .ceil(extent + shift + layout.posterHeight * (CardMotion.MaxScale - 1) + 4)
+        .toInt(),
+    )
   Row(
     Modifier.fillMaxWidth()
-      .offset(y = layout.rowTop.dp)
-      .height((layout.posterHeight + 32).dp)
+      .offset(y = (layout.posterTop - padding).dp)
+      .wrapContentHeight(Alignment.Top, unbounded = true)
+      .height((layout.posterHeight + 2 * padding).dp)
       .horizontalScroll(scroll)
-      .padding(horizontal = 32.dp, vertical = 16.dp),
+      .padding(horizontal = 32.dp, vertical = padding.dp),
     horizontalArrangement = Arrangement.spacedBy(layout.gap.dp),
   ) {
     posters.forEachIndexed { index, art ->
@@ -808,8 +860,16 @@ internal fun HomePreview(
     posters =
       withContext(Dispatchers.IO) {
         val store = PosterStore(context)
-        ProgramRepository(context).cached().take(16).map {
-          preparePosterArt(it, store, cachedOnly = true)
+        val backdrop = BackdropStyle(context)
+        val shadowStyle = HomeLayout(context).shadowStyle(backdrop.mode == 2 && backdrop.mat == 1)
+        ProgramRepository(context).cached().take(16).mapIndexed { index, program ->
+          preparePosterArt(
+            program,
+            store,
+            cachedOnly = true,
+            shadowStyle =
+              if (index == 0) shadowStyle else PosterShadow.Style(kind = PosterShadow.None),
+          )
         }
       }
   }

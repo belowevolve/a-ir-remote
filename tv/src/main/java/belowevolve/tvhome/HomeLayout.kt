@@ -8,7 +8,6 @@ import kotlin.math.roundToInt
 class HomeLayout(c: Context) {
   val mode: Int
   val bottom: Int
-  val rowTop: Int
   val posterTop: Int
   val captionStyle: Int
   val motion: Int
@@ -20,6 +19,10 @@ class HomeLayout(c: Context) {
   val posterHeight: Int
   val glow: Int
   val shadow: Int
+  val shadowX: Int
+  val shadowY: Int
+  val shadowSize: Int
+  val shadowBlur: Int
   val showTitle: Boolean
   val showEpisodeBadges: Boolean
   val badgeVisibility: Int
@@ -47,7 +50,10 @@ class HomeLayout(c: Context) {
     showNewsBadges = badgeVisibility != 2
     badgeFormat =
       clamp(
-        p.getInt("poster_badge_format", 0),
+        p.getInt(
+          "poster_badge_style",
+          p.getInt("poster_badge_format", 0).takeIf { it in 0..1 } ?: 0,
+        ),
         0,
         belowevolve.shared.design.PosterBadgeSpec.FORMATS.lastIndex,
       )
@@ -55,9 +61,12 @@ class HomeLayout(c: Context) {
     animateTitle = p.getBoolean("animate_title", true)
     glow = clamp(p.getInt("poster_glow", 100), 0, 100)
     shadow = clamp(p.getInt("poster_shadow", 0), 0, PosterShadow.NAMES.lastIndex)
+    shadowX = clamp(p.getInt("volume_shadow_x", 0), -32, 32)
+    shadowY = clamp(p.getInt("volume_shadow_y", PosterShadow.DefaultY), -32, 40)
+    shadowSize = clamp(p.getInt("volume_shadow_size", 100), 70, 140)
+    shadowBlur = clamp(p.getInt("volume_shadow_blur", 10), 2, 24)
     bottom = clamp(p.getInt("bottom_inset", 32), 24, 160)
     posterTop = if (mode == 0) 194 else 540 - bottom - posterHeight
-    rowTop = posterTop - 16
     val savedCaption: Int =
       p.getInt("caption_style", if (p.getBoolean("show_title", true)) 1 else 3)
     // Preserve IDs: retired badges become inline text; the old panel becomes two lines.
@@ -73,6 +82,14 @@ class HomeLayout(c: Context) {
     for (i: Int in CAPTION_IDS.indices) if (CAPTION_IDS[i] == captionStyle) return i
     return 1
   }
+
+  internal fun shadowStyle(wide: Boolean) =
+    PosterShadow.Style(
+      shadow,
+      wide,
+      if (shadow == 0) shadowSize else 100,
+      if (shadow == 0) shadowBlur else 10,
+    )
 
   companion object {
     // Defaults also define the reusable artwork/shadow template, independent of the size preset.
