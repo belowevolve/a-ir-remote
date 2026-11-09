@@ -11,6 +11,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import androidx.compose.ui.graphics.asAndroidBitmap
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -71,6 +72,7 @@ class LauncherRegressionRunner : Instrumentation() {
       checkArtworkSources(context)
       checkViews(context)
       checkBadgeSettings(context)
+      checkShadows()
       checkWallpaperPreview(context)
       checkPreparedWallpaper(context)
       ColorKeyActionsRegression.run()
@@ -283,8 +285,44 @@ class LauncherRegressionRunner : Instrumentation() {
       check(all.captionGap == 24, "Default caption spacing changed")
       preferences.edit().putInt("caption_gap", 32).commit()
       check(HomeLayout(isolated).captionGap == 32, "Caption spacing was not saved")
+      preferences.edit().putInt("poster_badge_format", 4).commit()
+      check(HomeLayout(isolated).badgeFormat == 0, "Retired numeric format was reinterpreted")
+      preferences.edit().putInt("poster_badge_format", 1).commit()
+      check(HomeLayout(isolated).badgeFormat == 1, "Episode-only preference was lost")
+      preferences.edit().putInt("poster_badge_style", 5).commit()
+      check(HomeLayout(isolated).badgeFormat == 5, "New badge style was not saved")
     } finally {
       context.deleteSharedPreferences(name)
+    }
+  }
+
+  private fun checkShadows() {
+    val styles =
+      listOf(
+        PosterShadow.Style(),
+        PosterShadow.Style(size = 70, blur = 2),
+        PosterShadow.Style(wide = true, size = 140, blur = 24),
+      )
+    for (style in styles) {
+      val mask = PosterShadow.load(Color.RED, style)
+      check(PosterShadow.cached(Color.RED, style) === mask, "Shadow was not reused from memory")
+      val bitmap = mask.image.asAndroidBitmap()
+      for (x in 0 until bitmap.width) {
+        check(
+          Color.alpha(bitmap.getPixel(x, 0)) == 0 &&
+            Color.alpha(bitmap.getPixel(x, bitmap.height - 1)) == 0,
+          "Shadow blur was cut at a horizontal texture edge",
+        )
+      }
+      for (y in 0 until bitmap.height) {
+        check(
+          Color.alpha(bitmap.getPixel(0, y)) == 0 &&
+            Color.alpha(bitmap.getPixel(bitmap.width - 1, y)) == 0,
+          "Shadow blur was cut at a vertical texture edge",
+        )
+      }
+      val centre = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
+      check(Color.alpha(centre) > 0 && Color.red(centre) > 250, "Shadow tint or body disappeared")
     }
   }
 
