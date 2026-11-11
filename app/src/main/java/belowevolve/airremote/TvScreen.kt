@@ -59,6 +59,7 @@ import belowevolve.shared.design.RemoteIcons
 @Composable
 internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
+    var voiceSettings by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         snapshotFlow { model.message }
@@ -264,7 +265,11 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
             text = { screen ->
                 if (screen == TvDeviceDialogState.SETTINGS) {
                     DialogActionGroup {
-                        DialogToggleRow("Автоклавиатура", model.autoKeyboard, model::updateAutoKeyboard)
+                        DialogToggleRow("Автоклавиатура", model.autoKeyboard, onChecked = model::updateAutoKeyboard)
+                        if (VoiceFeature.available) DialogActionRow("Голосовое управление") {
+                            model.dismissDeviceDialog()
+                            voiceSettings = true
+                        }
                         if (!model.connected)
                             DialogActionRow("Подключиться", loading = model.connecting) { model.connect() }
                         DialogActionRow("Входы / HDMI", enabled = model.connected) {
@@ -299,6 +304,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
         )
         if (state.expectsCode) TvPairingCodeDialog(model)
     }
+    if (voiceSettings) VoiceFeature.SettingsDialog(model.hasSelectedTv) { voiceSettings = false }
 }
 
 @Composable

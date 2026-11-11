@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="belowevolve.airremote.RemoteAssistantSessionService"
+    android:recognitionService="belowevolve.airremote.LocalCommandRecognitionService"
+    android:settingsActivity="belowevolve.airremote.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />

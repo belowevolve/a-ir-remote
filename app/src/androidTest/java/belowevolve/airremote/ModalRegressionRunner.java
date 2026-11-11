@@ -49,7 +49,9 @@ public final class ModalRegressionRunner extends Instrumentation {
             if (!"true".equals(args.getString("restoreOnly"))) {
                 backup();
                 getTargetContext().getSharedPreferences("pc_remote", 0).edit().putBoolean("auto_keyboard", false).commit();
-                if ("tv".equals(args.getString("screenPreview"))) runDisconnectedTvPreview(result);
+                if ("standard".equals(args.getString("editionChecks"))) runStandardEdition();
+                else if (args.getString("voiceUi") != null) runVoiceUi();
+                else if ("tv".equals(args.getString("screenPreview"))) runDisconnectedTvPreview(result);
                 else if ("true".equals(args.getString("microphoneSettings"))) runMicrophoneSettings();
                 else if ("true".equals(args.getString("bluetoothProgress"))) runBluetoothProgress();
                 else if ("true".equals(args.getString("tvPairingFixture"))) runTvPairing();
@@ -95,12 +97,16 @@ public final class ModalRegressionRunner extends Instrumentation {
         for (String key : new String[]{"host", "name", "auto_connect", "auto_keyboard"})
             remote.put(key, tv.contains(key) ? tv.getAll().get(key) : JSONObject.NULL);
         json.put("remote", remote);
+        if (args.getString("voiceUi") != null) {
+            String key = "air_home:" + tv.getString("host", "");
+            json.put("airHomeKey", key).put("airHomeValue", tv.contains(key) ? tv.getBoolean(key, false) : JSONObject.NULL);
+        }
         SharedPreferences mic = getTargetContext().getSharedPreferences("microphone", 0);
         JSONObject microphone = new JSONObject();
         for (String key : new String[]{"waveform", "icon_meter"})
             microphone.put(key, mic.contains(key) ? mic.getBoolean(key, false) : JSONObject.NULL);
         json.put("microphone", microphone);
-        if ("true".equals(args.getString("tvPairingFixture")))
+        if ("true".equals(args.getString("tvPairingFixture")) || "standard".equals(args.getString("editionChecks")))
             json.put("fixtureHost", fixtureHost()).put("cleanFixturePin", !getTargetContext().getSharedPreferences("tv_identity", 0).contains(fixtureHost()));
         Files.write(file.toPath(), json.toString().getBytes(StandardCharsets.UTF_8));
     }
@@ -127,6 +133,12 @@ public final class ModalRegressionRunner extends Instrumentation {
                 else tv.putString(key, remote.getString(key));
             }
             require(tv.commit(), "tv_preferences_restore_failed");
+        }
+        if (json.has("airHomeKey")) {
+            SharedPreferences.Editor tv = getTargetContext().getSharedPreferences("remote", 0).edit();
+            if (json.isNull("airHomeValue")) tv.remove(json.getString("airHomeKey"));
+            else tv.putBoolean(json.getString("airHomeKey"), json.getBoolean("airHomeValue"));
+            require(tv.commit(), "air_home_restore_failed");
         }
         if (json.has("microphone")) {
             SharedPreferences.Editor mic = getTargetContext().getSharedPreferences("microphone", 0).edit();
@@ -199,6 +211,175 @@ public final class ModalRegressionRunner extends Instrumentation {
         require(focusedWindow() == parent, "parent_window_was_recreated");
         click(await("Готово")); events.add(phase + ": PASS");
 
+    }
+
+    /** Opens settings only. Does not execute voice commands or control a real TV. */
+    private void runStandardEdition() throws Exception {
+        phase = "standard_edition";
+        try {
+            getTargetContext().getClassLoader().loadClass("belowevolve.airremote.VoiceControlService");
+            throw new CheckFailure("voice_service_in_standard_edition");
+        } catch (ClassNotFoundException expected) { }
+        File model = new File(getTargetContext().getNoBackupFilesDir(), "voice");
+        require(model.mkdirs() || model.isDirectory(), "model_fixture_directory");
+        Files.write(new File(model, "previous-voice-edition").toPath(), new byte[1024]);
+        require(getTargetContext().getSharedPreferences("remote", 0).edit()
+            .putString("host", "127.0.0.1").putString("name", "Edition fixture")
+            .putBoolean("auto_connect", false).commit(), "edition_fixture_setup_failed");
+        SharedPreferences identity = getTargetContext().getSharedPreferences("tv_identity", 0);
+        if (!identity.contains("127.0.0.1"))
+            require(identity.edit().putString("127.0.0.1", "edition-fixture").commit(), "edition_fixture_identity");
+        launch();
+        long deadline = SystemClock.elapsedRealtime() + 5000;
+        while (model.exists() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50);
+        require(!model.exists(), "old_voice_model_not_removed");
+        click(await("ТВ")); click(await("Настройки ТВ"));
+        await("Забыть ТВ");
+        require(find(root(), "Голосовое управление") == null, "voice_settings_in_standard_edition");
+        require("127.0.0.1".equals(getTargetContext().getSharedPreferences("remote", 0).getString("host", "")),
+            "edition_cleanup_removed_pairing_selection");
+        capture("standard-edition"); click(await("Готово"));
+        await("Микрофон");
+        events.add("standard_edition: PASS (no assistant, old model removed, TV selection and PC microphone retained)");
+    }
+
+    /** Opens settings only. Does not execute voice commands or control a real TV. */
+    private void runVoiceUi() throws Exception {
+        phase = "voice_ui";
+        require(getTargetContext().getSharedPreferences("remote", 0).edit()
+                .putBoolean("auto_connect", false).commit(), "voice_ui_disable_tv_connection");
+        boolean guide = "guide".equals(args.getString("voiceUi"));
+        boolean stateButton = "state".equals(args.getString("voiceUi"));
+        SharedPreferences tv = getTargetContext().getSharedPreferences("remote", 0);
+        require(tv.edit().putBoolean("air_home:" + tv.getString("host", ""), !guide).commit(), "voice_ui_home_state_setup_failed");
+        launch();
+        click(await("ТВ")); click(await("Настройки ТВ"));
+        await("Голосовое управление"); capture("voice-parent-" + args.getString("voiceUi"));
+        click(await("Голосовое управление"));
+        await("Голосовое управление"); SystemClock.sleep(500); capture("voice-top-" + args.getString("voiceUi"));
+        if ("status".equals(args.getString("voiceUi"))) captureVoiceStatuses();
+        if ("checks".equals(args.getString("voiceUi")) || guide || stateButton) {
+            require(find(root(), "Прослушивание") == null, "obsolete_listening_heading");
+            if (!guide && !stateButton) {
+                click(await("Ассистент по умолчанию"));
+                checkSettingsNavigation("assistant-settings");
+                await("Голосовое управление");
+                click(await("Уведомления"));
+                checkSettingsNavigation("voice-notification-settings");
+                await("Голосовое управление");
+            }
+            require(find(root(), "Быстрое питание по ИК") == null, "obsolete_ir_option");
+            AccessibilityNodeInfo scroll = scrollable(root());
+            require(scroll != null, "voice_commands_not_scrollable");
+            require(scroll.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD), "voice_scroll_failed");
+            SystemClock.sleep(350); capture("voice-middle-checks");
+            for (int i=0;i<8;i++) {
+                scroll = scrollable(root());
+                if (scroll == null || !scroll.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) break;
+                SystemClock.sleep(150);
+            }
+            capture("voice-bottom-" + args.getString("voiceUi"));
+            if (guide) {
+                await("Гайд по установке");
+                require(find(root(), "Перемотай \"15 минут\"") == null, "air_home_commands_without_companion");
+            } else {
+                require(find(root(), "Гайд по установке") == null, "guide_with_companion");
+                await("Громкость \"20\""); await("Перемотай \"15 минут\""); await("Отмотай \"30 секунд\"");
+                if (stateButton) {
+                    captureHoveredButton("Air Home", "voice-home-present-hover");
+                    require(headerSwitch().isChecked(), "home_switch_not_checked");
+                    click(await("Air Home"));
+                    await("Гайд по установке");
+                    require(!headerSwitch().isChecked(), "home_switch_still_checked");
+                    require(!tv.getBoolean("air_home:" + tv.getString("host", ""), true), "home_button_disable_not_saved");
+                    capture("voice-home-absent");
+                    captureHoveredButton("Air Home", "voice-home-absent-hover");
+                    click(await("Air Home"));
+                    waitForIdleSync();
+                    require(headerSwitch().isChecked(), "home_switch_not_reenabled");
+                    require(tv.getBoolean("air_home:" + tv.getString("host", ""), false), "home_button_enable_not_saved");
+                    require(find(root(), "Гайд по установке") == null, "guide_after_enabling_home");
+                    events.add("home_header_switch_toggle_and_persistence: PASS");
+                }
+            }
+        }
+        click(await("Готово"));
+        events.add("voice_ui: PASS (settings only, no TV commands)");
+    }
+
+    /** Emulator-only previews of transient messages; never opens the microphone or sends commands. */
+    private void captureVoiceStatuses() throws Exception {
+        require("ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE), "status_preview_requires_emulator");
+        Class<?> service = Class.forName("belowevolve.airremote.VoiceControlService");
+        java.lang.reflect.Field field = service.getDeclaredField("mutableStatus"); field.setAccessible(true);
+        Object flow = field.get(null);
+        Class<?> mutable = Class.forName("kotlinx.coroutines.flow.MutableStateFlow");
+        java.lang.reflect.Method get = Class.forName("kotlinx.coroutines.flow.StateFlow").getMethod("getValue");
+        java.lang.reflect.Method set = mutable.getMethod("setValue", Object.class);
+        java.lang.reflect.Constructor<?> status = Class.forName("belowevolve.airremote.VoiceControlStatus")
+                .getDeclaredConstructor(boolean.class, boolean.class, String.class);
+        Object original = get.invoke(flow);
+        String[] messages = {"Подготовка распознавания…", "Микрофон временно занят или отключён Android. Жду восстановления…", "Команда переключения на HDMI отправлена", "Слушаю команды"};
+        try {
+            for (int i = 0; i < messages.length; i++) {
+                set.invoke(flow, status.newInstance(true, i == 0, messages[i]));
+                await(messages[i]); SystemClock.sleep(300); capture("voice-status-" + i);
+            }
+            events.add("full_width_voice_status_previews: PASS");
+        } finally { set.invoke(flow, original); }
+    }
+
+    private void captureHoveredButton(String label, String name) throws Exception {
+        AccessibilityNodeInfo node = await(label);
+        while (node != null && !node.isClickable()) node = node.getParent();
+        require(node != null, "hover_button_missing");
+        Rect bounds = new Rect(); node.getBoundsInScreen(bounds);
+        long at = SystemClock.uptimeMillis();
+        MotionEvent hover = MotionEvent.obtain(at, at, MotionEvent.ACTION_HOVER_MOVE, bounds.exactCenterX(), bounds.exactCenterY(), 0);
+        hover.setSource(InputDevice.SOURCE_MOUSE);
+        require(automation.injectInputEvent(hover, true), "hover_injection_failed"); hover.recycle();
+        try { SystemClock.sleep(150); capture(name); }
+        finally {
+            MotionEvent exit = MotionEvent.obtain(at, SystemClock.uptimeMillis(), MotionEvent.ACTION_HOVER_EXIT, bounds.exactCenterX(), bounds.exactCenterY(), 0);
+            exit.setSource(InputDevice.SOURCE_MOUSE); automation.injectInputEvent(exit, true); exit.recycle();
+        }
+    }
+
+    private AccessibilityNodeInfo headerSwitch() {
+        AccessibilityNodeInfo node = await("Air Home");
+        while (node != null && !node.isCheckable()) node = node.getParent();
+        require(node != null, "home_header_switch_missing");
+        return node;
+    }
+
+    private void checkSettingsNavigation(String name) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + 7_000;
+        AccessibilityNodeInfo system = null;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            system = automation.getRootInActiveWindow();
+            if (system != null && system.getPackageName() != null && !pkg.contentEquals(system.getPackageName())) break;
+            SystemClock.sleep(50);
+        }
+        require(system != null && system.getPackageName() != null && !pkg.contentEquals(system.getPackageName()), name + "_not_opened");
+        SystemClock.sleep(500);
+        Bitmap screenshot = automation.takeScreenshot();
+        require(screenshot != null, "system_screenshot_missing");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(new File(getTargetContext().getExternalFilesDir("modal-fixture"), name + ".png"))) {
+            screenshot.compress(Bitmap.CompressFormat.PNG, 100, out);
+        }
+        screenshot.recycle();
+        events.add(name + ": PASS (" + system.getPackageName() + ")");
+        require(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK), "settings_back_failed");
+        SystemClock.sleep(350);
+    }
+
+    private AccessibilityNodeInfo scrollable(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        if (node.isVisibleToUser() && node.isScrollable()) return node;
+        for (int i=0;i<node.getChildCount();i++) {
+            AccessibilityNodeInfo found = scrollable(node.getChild(i)); if (found != null) return found;
+        }
+        return null;
     }
 
     private void runInteractions() throws Exception {
@@ -755,6 +936,7 @@ public final class ModalRegressionRunner extends Instrumentation {
     private AccessibilityNodeInfo await(String text) {
         long deadline = SystemClock.elapsedRealtime() + 7_000;
         while (SystemClock.elapsedRealtime() < deadline) {
+            automation.clearCache();
             AccessibilityNodeInfo node = find(root(), text);
             if (node != null && node.isEnabled()) {
                 AccessibilityNodeInfo action = node;

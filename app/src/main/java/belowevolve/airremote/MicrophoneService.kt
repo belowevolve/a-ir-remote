@@ -103,6 +103,9 @@ class MicrophoneService : Service() {
         if (session != null) return START_NOT_STICKY
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
         try {
+            check(!VoiceFeature.active) {
+                "Сначала останови голосовое управление в настройках ТВ"
+            }
             check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 "Нет доступа к микрофону"
             }

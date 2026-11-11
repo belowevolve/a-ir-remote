@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        VoiceFeature.restore(this)
         model.onMicrophonePermissionNeeded = { microphone.launch(Manifest.permission.RECORD_AUDIO) }
         model.resume()
         pcModel.resume()

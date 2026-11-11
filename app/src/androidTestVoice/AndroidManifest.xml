@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.TRANSMIT_IR" />
+    <application>
+        <receiver android:name="belowevolve.airremote.IrProbeReceiver" android:exported="true" android:permission="android.permission.DUMP" />
+
+        <activity android:name="belowevolve.airremote.VoicePlaybackActivity" android:exported="true"
+            android:showWhenLocked="true" />
+    </application>
+    <!-- AGP applies defaultConfig.testInstrumentationRunner to the first entry. -->
+    <instrumentation
+        android:name="belowevolve.airremote.InputRegressionRunner"
+        android:targetPackage="belowevolve.airremote"
+        android:functionalTest="false"
+        android:handleProfiling="false"
+        android:label="Air Remote functional regression checks" />
+    <instrumentation
+        android:name="belowevolve.airremote.ScreenPreviewRunner"
+        android:targetPackage="belowevolve.airremote"
+        android:functionalTest="false"
+        android:handleProfiling="false"
+        android:label="Air Remote app-window preview" />
+    <instrumentation
+        android:name="belowevolve.airremote.PcNativeImeRunner"
+        android:targetPackage="belowevolve.airremote"
+        android:functionalTest="false"
+        android:handleProfiling="false"
+        android:label="Air Remote opt-in native IME fixture" />
+    <instrumentation android:name="belowevolve.airremote.ModalRegressionRunner"
+        android:targetPackage="belowevolve.airremote" android:functionalTest="false"
+        android:handleProfiling="false" android:label="Air Remote opt-in modal window check" />
+
+    <instrumentation android:name="belowevolve.airremote.VoiceControlRegressionRunner"
+        android:targetPackage="belowevolve.airremote" android:functionalTest="false"
+        android:handleProfiling="false" android:label="Air Remote offline voice checks" />
+    <instrumentation android:name="belowevolve.airremote.SpeechSupportProbeRunner"
+        android:targetPackage="belowevolve.airremote" android:functionalTest="false" android:handleProfiling="false" />
+</manifest>

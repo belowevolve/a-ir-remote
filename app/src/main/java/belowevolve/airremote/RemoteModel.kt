@@ -239,6 +239,16 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         stopVoice()
         hideKeyboard()
         stopDiscovery()
+        if (VoiceFeature.active) {
+            // The microphone service owns the background remote. Do not leave a second
+            // UI session with an old power snapshot competing with its wake requests.
+            connectionJob?.cancel()
+            connectionJob = null
+            if (initialized) client.close()
+            connected = false
+            connecting = false
+            resetConnectionState()
+        }
     }
 
     fun discover() {
@@ -421,6 +431,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         prefs.edit {
             remove("host")
             remove("name")
+            remove("air_home:$previousHost")
+            remove("voice_ir:$previousHost")
             if (prefs.getString("ir_host", null) == previousHost) {
                 remove("ir")
                 remove("ir_host")
@@ -610,6 +622,10 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun startVoice() {
         if (!foreground || !tvMode || voiceJob?.isActive == true) return
+        if (VoiceFeature.active) {
+            message = "Сначала останови голосовое управление в настройках ТВ"
+            return
+        }
         if (MicrophoneService.status.value.active) {
             message = "Сначала останови микрофон для ПК"
             return

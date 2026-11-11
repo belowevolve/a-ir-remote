@@ -1,0 +1,12 @@
+Local Russian speech recognition uses Vosk and vosk-model-small-ru-0.22.
+Both are distributed under the Apache License, Version 2.0.
+Native access uses JNA, available under Apache-2.0 or LGPL-2.1-or-later.
+This distribution uses the Apache-2.0 option.
+https://github.com/java-native-access/jna
+https://alphacephei.com/vosk/
+https://alphacephei.com/vosk/models
+https://www.apache.org/licenses/LICENSE-2.0
+
+The model archive is fetched at build time from the original publisher,
+verified with SHA-256 and bundled in the APK. No runtime download is needed.
+SHA-256: 961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4
