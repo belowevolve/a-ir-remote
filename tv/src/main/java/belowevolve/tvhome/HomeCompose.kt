@@ -32,7 +32,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import belowevolve.shared.compose.AirButton
 import belowevolve.shared.design.PosterBadgeSpec
@@ -558,26 +557,16 @@ internal fun HomeContent(
   Box(
     modifier
       .fillMaxSize()
-      .then(
-        if (preview || wallpaper == null) Modifier.background(MaterialTheme.colorScheme.background)
-        else Modifier
-      )
+      .background(MaterialTheme.colorScheme.background)
   ) {
     if (wallpaper != null && !wallpaper.isRecycled)
-      if (preview)
-        Image(
-          remember(wallpaper) { wallpaper.asImageBitmap() },
-          null,
-          Modifier.fillMaxSize(),
-          contentScale = ContentScale.Crop,
-          filterQuality = FilterQuality.Low,
-        )
-      else
-        AndroidView(
-          factory = { WallpaperSurface(it) },
-          update = { it.show(wallpaper) },
-          modifier = Modifier.fillMaxSize(),
-        )
+      Image(
+        remember(wallpaper) { wallpaper.asImageBitmap() },
+        null,
+        Modifier.fillMaxSize(),
+        contentScale = ContentScale.Crop,
+        filterQuality = FilterQuality.Low,
+      )
     Row(
       Modifier.align(Alignment.TopEnd)
         .zIndex(1f)
