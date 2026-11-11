@@ -17,7 +17,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 private const val IME_TAG = "AirRemoteIme"
 private const val TV_TAG = "AirRemoteTv"
 
-class TvClient(private val identity: TvIdentity) {
+class TvClient(private val identity: TvIdentity, initialPort: Int = 6466) {
     @Volatile private var socket: SSLSocket? = null
     @Volatile private var pairingSocket: SSLSocket? = null
     private var pairingHost = ""
@@ -28,12 +28,18 @@ class TvClient(private val identity: TvIdentity) {
     private val writeLock = Any()
     private val connectionLock = Any()
     private val connectingSockets = mutableSetOf<SSLSocket>()
-    private val remotePorts = TvConnectionPorts()
+    private val remotePorts = TvConnectionPorts(initialPort)
     private var connectionVersion = 0L
     private var pairingVersion = 0L
     private val keyboard = TvKeyboard()
     
     private fun open(host: String, port: Int, pairing: Boolean, version: Long? = null, pairVersion: Long? = null): SSLSocket {
+        val openingAt = android.os.SystemClock.elapsedRealtime()
+        fun trace(stage: String) {
+            if (!pairing && Log.isLoggable(TV_TAG, Log.DEBUG))
+                Log.d(TV_TAG, "Transport $stage port=$port elapsed=${android.os.SystemClock.elapsedRealtime()} durationMs=${android.os.SystemClock.elapsedRealtime() - openingAt}")
+        }
+        trace("opening")
         val s = identity.context(host, pairing).socketFactory.createSocket() as SSLSocket
         return try {
             if (pairVersion != null) synchronized(connectionLock) {
@@ -49,7 +55,9 @@ class TvClient(private val identity: TvIdentity) {
             s.keepAlive = true
             s.soTimeout = 12000
             s.connect(InetSocketAddress(host, port), if (port == 6465) 1500 else 5000)
+            trace("tcp")
             s.startHandshake()
+            trace("tls")
             s
         } catch (e: Exception) { runCatching { s.close() }; throw e }
         finally { synchronized(connectionLock) { connectingSockets.remove(s) } }
@@ -121,9 +129,9 @@ class TvClient(private val identity: TvIdentity) {
         Dispatchers.IO.dispatch(EmptyCoroutineContext) { closing.forEach { runCatching { it.close() } } }
     }
     
-    fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, onVoiceRequest: (Boolean) -> Unit, ready: (Boolean) -> Unit) {
+    fun listen(host: String, onKeyboard: (KeyboardUpdate) -> Unit, onVoiceRequest: (Boolean) -> Unit, preferredPort: Int? = null, ready: (Boolean) -> Unit) {
         val version = synchronized(connectionLock) { connectionVersion }
-        remotePorts.connect(host) { port, established ->
+        remotePorts.connect(host, preferredPort) { port, established ->
             listenPort(host, port, version, onKeyboard, onVoiceRequest) { powered ->
                 established()
                 ready(powered)
@@ -187,8 +195,8 @@ class TvClient(private val identity: TvIdentity) {
                         msg.hasRemoteStart() -> {
                             keyStartup.ready(s)
                             if ((features and 32) != 0) power.update(msg.remoteStart.started)
-                            if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power port=$port on=${msg.remoteStart.started}")
-                            // The vendor wake endpoint can remain silent while healthy.
+                            if (Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power port=$port on=${msg.remoteStart.started} elapsed=${android.os.SystemClock.elapsedRealtime()}")
+                            // Google's wake endpoint can remain silent while healthy.
                             // The normal control endpoint sends heartbeats, so retain
                             // its deadline to detect a stalled network connection.
                             s.soTimeout = if (port == 6465) 0 else 65000
@@ -217,7 +225,7 @@ class TvClient(private val identity: TvIdentity) {
     }
     
     private fun send(message: MessageLite) = synchronized(writeLock) {
-        val s = socket ?: error("Нет соединения с ТВ")
+        val s = socket ?: throw EOFException("Нет соединения с ТВ")
         message.writeDelimitedTo(s.outputStream); s.outputStream.flush()
     }
     
@@ -242,18 +250,19 @@ class TvClient(private val identity: TvIdentity) {
         }
     }
     
-    suspend fun ensureAwake() = power.ensureAwake { sendKey(26) }
+    suspend fun ensureAwake(ackTimeoutMillis: Long = 5_000, wake: (() -> Unit)? = null) =
+        power.ensureAwake(ackTimeoutMillis) { if (wake != null) wake() else sendKey(26) }
 
     fun prepareExternalWake(): CompletableDeferred<Unit>? = power.explicitWakeSent()
 
     fun externalWakeFailed(pending: CompletableDeferred<Unit>?, error: Exception) = power.failed(pending, error)
 
     fun sendKey(code: Int, direction: RemoteDirection = RemoteDirection.SHORT) {
-        val expected = synchronized(writeLock) { socket ?: error("Нет соединения с ТВ") }
+        val expected = synchronized(writeLock) { socket ?: throw EOFException("Нет соединения с ТВ") }
         keyStartup.awaitReady(expected)
         synchronized(writeLock) {
             if (socket !== expected) throw EOFException("Соединение с ТВ изменилось")
-            if (code == 26 && Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power key port=${expected.port} direction=$direction")
+            if ((code == 26 || code == 177 || code == 224) && Log.isLoggable(TV_TAG, Log.DEBUG)) Log.d(TV_TAG, "Power key=$code port=${expected.port} direction=$direction elapsed=${android.os.SystemClock.elapsedRealtime()}")
             send(RemoteMessage.newBuilder().setRemoteKeyInject(RemoteKeyInject.newBuilder().setKeyCodeValue(code).setDirection(direction)).build())
             power.keySent(code, direction)
         }

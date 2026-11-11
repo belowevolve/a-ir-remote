@@ -163,7 +163,7 @@ internal fun Instrumentation.checkTvConnectionLifecycle() {
     }
 }
 
-private fun restorePreferences(prefs: SharedPreferences, saved: Map<String, *>) {
+internal fun restorePreferences(prefs: SharedPreferences, saved: Map<String, *>) {
     val editor = prefs.edit().clear()
     saved.forEach { (key, value) ->
         when (value) {
@@ -178,12 +178,21 @@ private fun restorePreferences(prefs: SharedPreferences, saved: Map<String, *>) 
     check(editor.commit()) { "Failed to restore fixture preferences" }
 }
 
-private class LoopbackTv(certificate: X509Certificate, alias: String) : Closeable {
+internal class LoopbackTv(
+    certificate: X509Certificate,
+    alias: String,
+    private val features: Int = 1 or 2 or 4 or 8 or 32 or 512,
+    private val automaticPower: Boolean = false,
+    private val disconnectOnPower: Boolean = false,
+    private val suppressPowerAck: Boolean = false,
+) : Closeable {
     val connections = AtomicInteger()
     val closed = AtomicInteger()
     private val sessions = LinkedBlockingQueue<SSLSocket>()
     private val keys = LinkedBlockingQueue<RemoteKeyInject>()
     private val pings = LinkedBlockingQueue<Int>()
+    val appLinks = LinkedBlockingQueue<String>()
+    @Volatile private var screenOn = true
     private val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     private val keyManager = object : X509ExtendedKeyManager() {
         override fun getClientAliases(type: String?, issuers: Array<out Principal>?) = null
@@ -208,12 +217,24 @@ private class LoopbackTv(certificate: X509Certificate, alias: String) : Closeabl
                     socket.startHandshake()
                     connections.incrementAndGet()
                     send(socket, RemoteMessage.newBuilder().setRemoteConfigure(
-                        RemoteConfigure.newBuilder().setCode1(1 or 2 or 4 or 8 or 32 or 512),
+                        RemoteConfigure.newBuilder().setCode1(features),
                     ).build())
                     sessions.offer(socket)
+                    if (automaticPower) reportPower(socket)
                     while (true) {
                         val message = RemoteMessage.parseDelimitedFrom(socket.inputStream) ?: break
-                        if (message.hasRemoteKeyInject()) keys.offer(message.remoteKeyInject)
+                        if (message.hasRemoteKeyInject()) {
+                            keys.offer(message.remoteKeyInject)
+                            if (automaticPower && message.remoteKeyInject.keyCodeValue == 26) {
+                                screenOn = !screenOn
+                                if (disconnectOnPower) {
+                                    listener.close()
+                                    break
+                                }
+                                if (!suppressPowerAck) reportPower(socket)
+                            }
+                        }
+                        if (message.hasRemoteAppLinkLaunchRequest()) appLinks.offer(message.remoteAppLinkLaunchRequest.appLink)
                         if (message.hasRemotePingResponse()) pings.offer(message.remotePingResponse.val1)
                     }
                 }
@@ -229,6 +250,9 @@ private class LoopbackTv(certificate: X509Certificate, alias: String) : Closeabl
     fun awaitSession(): SSLSocket = checkNotNull(sessions.poll(5, TimeUnit.SECONDS)) { "No TV session" }
     fun awaitKey(): RemoteKeyInject = checkNotNull(keys.poll(5, TimeUnit.SECONDS)) { "TV key not delivered" }
     fun awaitPing(): Int = checkNotNull(pings.poll(5, TimeUnit.SECONDS)) { "TV heartbeat not answered" }
+    fun noKey(): Boolean = keys.poll(100, TimeUnit.MILLISECONDS) == null
+    private fun reportPower(socket: SSLSocket) = send(socket, RemoteMessage.newBuilder()
+        .setRemoteStart(RemoteStart.newBuilder().setStarted(screenOn)).build())
     fun ready(socket: SSLSocket) = send(socket, RemoteMessage.newBuilder()
         .setRemoteStart(RemoteStart.newBuilder().setStarted(true)).build())
 

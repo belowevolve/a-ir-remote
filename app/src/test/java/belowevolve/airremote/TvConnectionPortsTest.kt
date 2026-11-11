@@ -7,6 +7,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TvConnectionPortsTest {
+    @Test fun standbySessionCanPreferTheAuthenticatedWakeEndpoint() {
+        val attempts = mutableListOf<Int>()
+        val ports = TvConnectionPorts(initialPort = 6465)
+        repeat(2) { ports.connect("tv") { port, ready -> attempts += port; ready() } }
+        assertEquals(listOf(6465, 6465), attempts)
+    }
+
+    @Test fun tvWithoutWakeEndpointFallsBackAndRemembersItsNormalControlPort() {
+        val attempts = mutableListOf<Int>()
+        val ports = TvConnectionPorts(initialPort = 6465)
+        repeat(2) {
+            ports.connect("tv") { port, ready ->
+                attempts += port
+                if (port == 6465) throw IOException("No wake endpoint")
+                ready()
+            }
+        }
+        assertEquals(listOf(6465, 6466, 6466), attempts)
+    }
     @Test fun certificateRejectionOnFirstReadFallsBackAndRemembersWorkingPort() {
         val ports = TvConnectionPorts()
         val attempts = mutableListOf<Int>()

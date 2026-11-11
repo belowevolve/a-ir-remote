@@ -56,7 +56,7 @@ internal class TvPowerSession(
         }
     }
 
-    suspend fun ensureAwake(sendWake: () -> Unit) {
+    suspend fun ensureAwake(ackTimeoutMillis: Long = timeoutMillis, sendWake: () -> Unit) {
         val (request, owner) = synchronized(lock) {
             if (screenOn != false) return
             val previous = awakening
@@ -79,7 +79,7 @@ internal class TvPowerSession(
                 if (send) sendWake()
             }
             // An internal timeout is an I/O failure; cancellation by the caller stays cancellation.
-            if (withTimeoutOrNull(timeoutMillis) { request.ready.await() } == null)
+            if (withTimeoutOrNull(ackTimeoutMillis) { request.ready.await() } == null)
                 throw SocketTimeoutException("ТВ не подтвердил включение экрана. Попробуй ещё раз")
         } catch (error: Exception) {
             // Cancelling a follower must not fail the owner's shared wake.
