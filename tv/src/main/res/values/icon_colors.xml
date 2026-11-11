@@ -1,0 +1,5 @@
+<resources>
+    <color name="air_icon_background">#101419</color>
+    <color name="air_icon_foreground">#E2E6EA</color>
+    <color name="air_icon_detail">#101419</color>
+</resources>

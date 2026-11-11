@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name="belowevolve.tvhome.RemoteKeyProbeActivity" android:exported="true" />
+    </application>
+    <instrumentation android:name="belowevolve.tvhome.LauncherRegressionRunner"
+        android:targetPackage="belowevolve.tvhome" android:functionalTest="false"
+        android:handleProfiling="false" />
+    <instrumentation android:name="belowevolve.tvhome.RemoteMediaProbeRunner"
+        android:targetPackage="belowevolve.tvhome" android:functionalTest="false"
+        android:handleProfiling="false" android:label="Air Remote media key transport probe" />
+    <instrumentation android:name="belowevolve.tvhome.MediaSessionProbeRunner"
+        android:targetPackage="belowevolve.tvhome" android:functionalTest="false" android:handleProfiling="false" />
+    <instrumentation android:name="belowevolve.tvhome.HomeDataMigrationRunner"
+        android:targetPackage="belowevolve.tvhome" android:functionalTest="false" android:handleProfiling="false" />
+</manifest>

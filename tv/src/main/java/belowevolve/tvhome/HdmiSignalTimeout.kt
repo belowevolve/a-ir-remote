@@ -1,13 +1,14 @@
 package belowevolve.tvhome
 
-/** One continuous no-video interval. Repeated callbacks and reconnects never extend it. */
-internal class HdmiSignalTimeout(private val timeoutMs: Long = 6_000L) {
+/** Time to act on the visible no-video message, excluding HDMI tuning/negotiation. */
+internal class HdmiSignalTimeout(private val timeoutMs: Long = 10_000L) {
     private var resumed = false
     private var unavailableSince: Long? = null
 
-    fun resume(now: Long, videoAvailable: Boolean, audioOnly: Boolean) {
+    fun resume(now: Long, videoAvailable: Boolean, audioOnly: Boolean, messageVisible: Boolean = false) {
         resumed = true
-        if (videoAvailable || audioOnly) available() else unavailable(now, false)
+        if (videoAvailable || audioOnly) available()
+        else if (messageVisible) unavailable(now, false)
     }
 
     fun unavailable(now: Long, audioOnly: Boolean) {

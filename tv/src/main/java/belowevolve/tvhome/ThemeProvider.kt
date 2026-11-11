@@ -5,8 +5,10 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.os.Binder
+import android.os.Process
 
-/** Read-only palette contract for APKs signed with our local key; no service or polling. */
+/** Read-only colors and button labels. Clients never need our private signing key. */
 class ThemeProvider : ContentProvider() {
     override fun onCreate() = true
 
@@ -14,12 +16,17 @@ class ThemeProvider : ContentProvider() {
         val context = requireNotNull(context)
         context.enforceCallingOrSelfPermission(
             "belowevolve.tvhome.permission.READ_THEME",
-            "Signed theme client required",
+            "Theme client must declare READ_THEME",
         )
-        if (method == "bindings")
+        if (method == "bindings") {
+            val caller = Binder.getCallingUid()
+            check(caller == Process.myUid() || context.packageManager.getPackagesForUid(caller)?.contains("mov.film") == true) {
+                "Button bindings are available only to the supported film.mov client"
+            }
             return Bundle().apply {
                 for (key in 183..186) putString(key.toString(), Actions.binding(context, key))
             }
+        }
         require(method == "palette") { "Unknown theme method" }
         return WallpaperTheme.load(context)?.filmPalette() ?: Bundle.EMPTY
     }

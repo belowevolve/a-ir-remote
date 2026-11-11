@@ -87,5 +87,5 @@ object Ui {
         return if (weights[dominant] > 0) colors[dominant] else -0x655e56
     }
 
-    fun toast(c: Context, s: String) { Toast.makeText(c, s, Toast.LENGTH_SHORT).show() }
+    fun toast(c: Context, s: String) { ThemedToast.post(c, s) }
 }

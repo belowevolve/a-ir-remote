@@ -114,7 +114,7 @@ object ColorKeyActionsRegression {
         host.foreground = "home"
         host.fireTimeout()
         check(
-            host.failures == 1 && "inputs" == host.foreground,
+            host.failures == 0 && "inputs" == host.foreground,
             "Lost STOPPED left HOME over the target",
         )
         keys.key("inputs", true, 0)
@@ -147,7 +147,9 @@ object ColorKeyActionsRegression {
         keys.dreamStarted()
         keys.key("mov.film", true, 0)
         check("mov.film" == host.foreground, "Rejected dismissal prevented immediate launch")
-        check(host.failures == 2 && host.timeout == null, "Rejected dismissal retained work")
+        check(host.failures == 0 && host.timeout != null, "Rejected dismissal reported failure before checking the window")
+        host.fireTimeout()
+        check(host.failures == 0, "A visible target was reported as an active screensaver")
     }
 
     private fun check(passed: Boolean, message: String) {
@@ -190,6 +192,8 @@ object ColorKeyActionsRegression {
             dismissals++
             return allowDismissal
         }
+
+        override fun isDreamVisible(): Boolean = foreground == "dream"
 
         override fun scheduleTimeout(action: Runnable, delayMs: Long) {
             check(

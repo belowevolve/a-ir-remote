@@ -22,6 +22,13 @@ import kotlinx.coroutines.*
 class SettingsActivity : QuietActivity() {
   private var page by mutableStateOf("main")
   private var colorCode by mutableIntStateOf(183)
+  private var mediaAccess by mutableStateOf(false)
+
+  override fun onResume() {
+    super.onResume()
+    mediaAccess = getSystemService(android.app.NotificationManager::class.java)
+      .isNotificationListenerAccessGranted(ComponentName(this, MediaAccessService::class.java))
+  }
 
   override fun onCreate(state: Bundle?) {
     super.onCreate(state)
@@ -128,6 +135,7 @@ class SettingsActivity : QuietActivity() {
                         ),
                         Triple("Тема", R.drawable.ic_palette, "theme"),
                         Triple("Приложения", R.drawable.ic_apps, "apps"),
+                        Triple(if (mediaAccess) "Управление медиа: включено" else "Управление медиа", R.drawable.ic_remote, "media-access"),
                         Triple(
                           "Настройки Android TV",
                           RemoteIcons.Settings,
@@ -146,6 +154,15 @@ class SettingsActivity : QuietActivity() {
                                   ThemeActivity::class.java,
                                 )
                               )
+                            "media-access" -> runCatching {
+                                startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                                    .putExtra(android.provider.Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                                        ComponentName(this@SettingsActivity, MediaAccessService::class.java).flattenToString()))
+                              }.onFailure {
+                                runCatching { startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                                  .onFailure { Ui.toast(this@SettingsActivity,
+                                    if (mediaAccess) "Системная перемотка разрешена" else "Настройки управления медиа недоступны; откройте гайд Air Home") }
+                              }
                             "android" -> runCatching {
                                 startActivity(Intent("android.settings.SETTINGS"))
                               }

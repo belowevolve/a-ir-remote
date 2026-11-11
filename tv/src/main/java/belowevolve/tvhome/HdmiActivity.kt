@@ -66,10 +66,12 @@ class HdmiActivity : QuietActivity() {
         tune()
     }
     private val noVideoTimeout: Runnable = Runnable {
-        WakeTrace.record(this, "hdmi_no_video")
         waitingForVideo = false
-        if (!resumed || videoAvailable || isAudioOnly()) return@Runnable
+        if (!resumed || videoAvailable || isAudioOnly() || showNoVideo) return@Runnable
+        WakeTrace.record(this, "hdmi_no_video")
         showNoVideo = true
+        signalTimeout.unavailable(SystemClock.elapsedRealtime(), false)
+        scheduleAutoHome()
         getSharedPreferences("home", 0)
             .edit()
             .putLong("hdmi_last_no_video_time", System.currentTimeMillis())
@@ -252,10 +254,23 @@ class HdmiActivity : QuietActivity() {
     }
 
     private fun awaitVideo() {
-        if (videoAvailable) signalTimeout.available()
-        else signalTimeout.unavailable(SystemClock.elapsedRealtime(), isAudioOnly())
+        if (videoAvailable || isAudioOnly()) signalTimeout.available()
+        else if (showNoVideo) signalTimeout.unavailable(SystemClock.elapsedRealtime(), false)
         scheduleAutoHome()
-        if (!resumed || videoAvailable || isAudioOnly() || waitingForVideo || showNoVideo) return
+        if (!resumed || videoAvailable || isAudioOnly() || showNoVideo) return
+        val noSignalConfirmed = unavailableReason == TvInputManager.VIDEO_UNAVAILABLE_REASON_NOT_CONNECTED ||
+            unavailableReason == TvInputManager.VIDEO_UNAVAILABLE_REASON_WEAK_SIGNAL ||
+            input?.let { selected ->
+                runCatching {
+                    getSystemService(TvInputManager::class.java).getInputState(selected) == TvInputManager.INPUT_STATE_DISCONNECTED
+                }.getOrDefault(false)
+            } == true
+        if (noSignalConfirmed) {
+            stopWaiting()
+            noVideoTimeout.run()
+            return
+        }
+        if (waitingForVideo) return
         waitingForVideo = true
         main.postDelayed(noVideoTimeout, 5000)
     }
@@ -309,7 +324,7 @@ class HdmiActivity : QuietActivity() {
             .apply()
         Ui.fullscreen(this)
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        signalTimeout.resume(SystemClock.elapsedRealtime(), videoAvailable, isAudioOnly())
+        signalTimeout.resume(SystemClock.elapsedRealtime(), videoAvailable, isAudioOnly(), showNoVideo)
         tune()
         audioAllowed = audio!!.requestAudioFocus(focus!!) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         updateVolume()
@@ -370,6 +385,8 @@ class HdmiActivity : QuietActivity() {
                 videoAvailable +
                 " waiting=" +
                 waitingForVideo +
+                " messageVisible=" +
+                showNoVideo +
                 " autoHomeMs=" +
                 signalTimeout.remaining(SystemClock.elapsedRealtime()) +
                 " reason=" +

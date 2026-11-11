@@ -101,6 +101,7 @@ object Actions {
             var i: Intent?
             if ("hdmi-toggle" == action)
                 i = if (HdmiActivity.isForeground) homeIntent(c) else HdmiActivity.intent(c, null)
+            else if ("hdmi-open" == action) i = HdmiActivity.intent(c, null)
             else if ("next-wallpaper" == action) i = homeIntent(c).putExtra("next_wallpaper", true)
             else if ("inputs" == action)
                 i = Intent(c, SettingsActivity::class.java).putExtra("section", "inputs")

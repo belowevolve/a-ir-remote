@@ -21,6 +21,10 @@ import java.util.HashSet
 class ColorKeyService : AccessibilityService() {
     private var tracing: Boolean = false
     private var debugKeys: BroadcastReceiver? = null
+    private var remoteLaunches: BroadcastReceiver? = null
+    private val messages by lazy { ThemedToast(this) }
+    private var remoteWakePending = false
+    private val clearRemoteWake = Runnable { remoteWakePending = false }
     private val main: Handler = Handler(Looper.getMainLooper())
     private val dreamPackages: HashSet<String> = HashSet<String>()
     private val shortcuts: ColorKeyActions =
@@ -55,6 +59,8 @@ class ColorKeyService : AccessibilityService() {
                     return performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
                 }
 
+                override fun isDreamVisible(): Boolean? = activeWindowPackage()?.let(dreamPackages::contains)
+
                 override fun scheduleTimeout(timeout: Runnable, delayMs: Long) {
                     main.postDelayed(timeout, delayMs)
                 }
@@ -80,12 +86,15 @@ class ColorKeyService : AccessibilityService() {
             override fun onReceive(c: Context, i: Intent) {
                 val action: String? = i.action
                 if (Intent.ACTION_DREAMING_STARTED == action) {
+                    resetRemoteWake()
                     WakeTrace.record(c, "dream_started")
                     shortcuts.dreamStarted()
                 } else if (Intent.ACTION_DREAMING_STOPPED == action) {
+                    resetRemoteWake()
                     WakeTrace.record(c, "dream_stopped")
                     shortcuts.dreamStopped()
                 } else if (Intent.ACTION_SCREEN_OFF == action) {
+                    resetRemoteWake()
                     WakeTrace.record(c, "screen_off")
                     shortcuts.reset()
                 } else if (Intent.ACTION_SCREEN_ON == action) {
@@ -154,20 +163,26 @@ class ColorKeyService : AccessibilityService() {
         // Dream broadcasts are not sticky: an already-running screensaver needs an initial
         // snapshot.
         inspectDreamWindow()
+        registerRemoteLaunches()
         registerDebugKeys()
     }
 
     override fun onDestroy() {
+        messages.close()
         contentResolver.unregisterContentObserver(bindingChanges)
         shortcuts.reset()
+        resetRemoteWake()
         if (debugKeys != null) unregisterReceiver(debugKeys)
+        if (remoteLaunches != null) unregisterReceiver(remoteLaunches)
         debugKeys = null
+        remoteLaunches = null
         if (tracing) unregisterReceiver(screens)
         tracing = false
         super.onDestroy()
     }
 
     override fun onAccessibilityEvent(e: AccessibilityEvent) {
+        if (messages.ownsWindow(e.windowId)) return
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg: String = (e.getPackageName()).toString()
         val cls: String = (e.getClassName()).toString()
@@ -202,10 +217,57 @@ class ColorKeyService : AccessibilityService() {
         val root: AccessibilityNodeInfo? = getRootInActiveWindow()
         if (root == null) return null
         try {
+            if (messages.ownsWindow(root.windowId)) return null
             return (root.getPackageName()).toString()
         } finally {
             root.recycle()
         }
+    }
+
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private fun registerRemoteLaunches() {
+        if (remoteLaunches != null) return
+        remoteLaunches = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == MediaSeek.ACTION) {
+                    val seconds = intent.getIntExtra("seconds", 0).takeIf { it != 0 && it in -6000..6000 } ?: return
+                    resultCode = android.app.Activity.RESULT_OK
+                    MediaSeek.perform(this@ColorKeyService, seconds, activeWindowPackage())
+                    return
+                }
+                if (intent.action == ThemedToast.ACTION) {
+                    val message = intent.getStringExtra("message")?.take(240) ?: return
+                    if (messages.show(message)) resultCode = android.app.Activity.RESULT_OK
+                    return
+                }
+                val route = RemoteLaunchAction.fromRoute("airhome", "remote", intent.getStringExtra("path")) ?: return
+                if (route == RemoteLaunchAction.WAKE) {
+                    // BACK is consumed by the system dream and reveals the existing player.
+                    // Never inject it into an ordinary application window.
+                    if (!remoteWakePending && dreamPackages.contains(activeWindowPackage())) {
+                        WakeTrace.record(this@ColorKeyService, "remote_dream_back")
+                        remoteWakePending = performGlobalAction(GLOBAL_ACTION_BACK)
+                        if (remoteWakePending) main.postDelayed(clearRemoteWake, ColorKeyActions.DISMISS_TIMEOUT_MS)
+                    }
+                    resultCode = android.app.Activity.RESULT_OK
+                    return
+                }
+                val target = route.shortcut ?: return
+                inspectDreamWindow()
+                WakeTrace.record(this@ColorKeyService, "remote_" + route.name.lowercase())
+                shortcuts.key(target, true, 0)
+                resultCode = android.app.Activity.RESULT_OK
+            }
+        }
+        val filter = IntentFilter(RemoteLaunchAction.BROADCAST).apply { addAction(ThemedToast.ACTION); addAction(MediaSeek.ACTION) }
+        if (Build.VERSION.SDK_INT >= 33)
+            registerReceiver(remoteLaunches, filter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(remoteLaunches, filter, "belowevolve.tvhome.permission.INTERNAL_CONTROL", main)
+    }
+
+    private fun resetRemoteWake() {
+        remoteWakePending = false
+        main.removeCallbacks(clearRemoteWake)
     }
 
     @android.annotation.SuppressLint(

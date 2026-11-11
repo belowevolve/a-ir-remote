@@ -17,6 +17,9 @@ class ColorKeyActions(private val host: Host) {
 
         fun dismissDream(): Boolean
 
+        /** Current window observation; null means that Android has not exposed a root yet. */
+        fun isDreamVisible(): Boolean?
+
         fun scheduleTimeout(timeout: Runnable, delayMs: Long)
 
         fun cancelTimeout(timeout: Runnable)
@@ -29,7 +32,9 @@ class ColorKeyActions(private val host: Host) {
     private fun onTimeout() {
         if (pendingTarget == null) return
         pendingTarget!!.restoreIfNeeded()
-        val failedToClose: Boolean = dreaming
+        // STOPPED can arrive after the target is already visible. A stale broadcast flag
+        // alone is not evidence of failure; an unavailable window is not evidence either.
+        val failedToClose = dreaming && host.isDreamVisible() == true
         // The STOPPED broadcast may have been lost. The service rechecks the current root package
         // on the next shortcut, so an old observation must not trap every later key behind HOME.
         dreaming = false
@@ -83,9 +88,9 @@ class ColorKeyActions(private val host: Host) {
         if (!alreadyDismissing) {
             host.scheduleTimeout(timeout, DISMISS_TIMEOUT_MS)
             if (!host.dismissDream()) {
-                cancelPending()
                 host.trace("dream_dismiss_rejected")
-                host.dismissalFailed()
+                // Launching the target may itself end the dream. Verify the resulting
+                // window at the same bounded timeout before showing an error.
             }
         }
         // Starting the app and closing the screensaver happen together; never wait for STOPPED.
