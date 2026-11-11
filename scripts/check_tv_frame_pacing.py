@@ -65,7 +65,8 @@ def main():
     def shell(*command):
         return adb("shell", shlex.join(command))
     def focus():
-        match = re.search(r"mCurrentFocus=(.*)", shell("dumpsys", "window"))
+        # The full dump also includes the focus saved with the last ANR.
+        match = re.search(r"mCurrentFocus=(.*)", shell("dumpsys", "window", "displays"))
         return match[1] if match else ""
 
     if int(shell("getprop", "ro.build.version.sdk").strip()) < 34:
