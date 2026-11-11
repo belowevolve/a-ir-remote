@@ -1,0 +1,12 @@
+plugins { id 'java' }
+repositories { google(); mavenCentral() }
+java { sourceCompatibility = JavaVersion.VERSION_1_8; targetCompatibility = JavaVersion.VERSION_1_8 }
+def sdk = System.getenv('ANDROID_HOME') ?: "${System.getProperty('user.home')}/Library/Android/sdk"
+dependencies {
+    compileOnly files("$sdk/platforms/android-35/android.jar")
+    implementation 'org.smali:baksmali:2.5.2'
+    implementation 'org.smali:smali:2.5.2'
+    implementation 'io.github.reandroid:ARSCLib:1.4.0'
+    implementation 'com.android.tools.build:apksig:8.7.3'
+}
+tasks.register('runtimeJars', Copy) { from configurations.runtimeClasspath; into layout.buildDirectory.dir('runtime') }
