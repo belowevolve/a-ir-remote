@@ -10,8 +10,14 @@ artifacts/
 *.jks
 *.keystore
 *.p12
+*.pk8
+*.key
+*.apk
+*.aab
+*.idsig
 .env
 .env.*
+__pycache__/
 
 # Rust companion
 companion/target/

@@ -20,6 +20,10 @@ def main():
     if not match:
         raise ValueError("Expected a stable Android versionName (major.minor.patch)")
     version = match.group(1)
+    tv_build = (root / "tv/build.gradle.kts").read_text()
+    tv_match = re.search(r'^\s*versionName = "(\d+\.\d+\.\d+)"\s*$', tv_build, re.MULTILINE)
+    if not tv_match:
+        raise ValueError("Expected a stable Air Home versionName (major.minor.patch)")
     companion = tomllib.loads((root / "companion/Cargo.toml").read_text())["package"]["version"]
     if not re.fullmatch(r"\d+\.\d+\.\d+", companion):
         raise ValueError("Expected a stable companion version")
@@ -37,7 +41,7 @@ def main():
         except urllib.error.HTTPError as error:
             if error.code != 404:
                 raise
-    for key, value in {"android": version, "companion": companion, "tag": tag,
+    for key, value in {"android": version, "tv": tv_match.group(1), "companion": companion, "tag": tag,
                        "publish": str(publish).lower()}.items():
         print(f"{key}={value}")
 
