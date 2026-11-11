@@ -7,6 +7,7 @@ import belowevolve.shared.design.RemoteSpacing
 
 /** App spacing and component geometry, complementing MaterialTheme's colors and typography. */
 internal object RemoteLayout {
+    val ExtraSmallGap = RemoteSpacing.ExtraSmall.dp
     val ScreenPadding = RemoteSpacing.Large.dp
     val SmallGap = RemoteSpacing.Small.dp
     val Gap = RemoteSpacing.Medium.dp

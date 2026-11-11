@@ -137,8 +137,9 @@ internal fun PcDeviceDialog(
                             DialogActionGroup {
                                 if (kind == DeviceKind.MICROPHONE)
                                     Column {
-                                        DialogToggleRow("Показывать волну", model.waveformEnabled, model::updateWaveform)
-                                        DialogToggleRow("Анимация микрофона", model.iconMeterEnabled, model::updateIconMeter)
+                                        DialogToggleRow("Показывать волну", model.waveformEnabled, onChecked = model::updateWaveform)
+                                        DialogToggleRow("Анимация микрофона", model.iconMeterEnabled, onChecked = model::updateIconMeter)
+                                        NotificationSettingsRow("microphone", "Микрофон для ПК")
                                     }
                                 else {
                                     DialogToggleRow("Автоклавиатура", model.autoKeyboard) { enabled ->
@@ -153,6 +154,7 @@ internal fun PcDeviceDialog(
                                         PcPointerSensitivity.Range,
                                         36,
                                     )
+                                    NotificationSettingsRow("pc_connection", "Подключение к ПК")
                                 }
                                 if (!model.connected)
                                     DialogActionRow("Подключить Bluetooth") { open(PcDialogPage.BLUETOOTH) }

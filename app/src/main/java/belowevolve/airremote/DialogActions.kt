@@ -41,7 +41,7 @@ internal fun <T> DeviceConnectionList(
     DialogActionGroup {
         if (loading && devices.isEmpty())
             Row(
-                Modifier.fillMaxWidth().padding(RemoteLayout.ScreenPadding),
+                Modifier.fillMaxWidth().padding(horizontal = RemoteLayout.Gap, vertical = RemoteLayout.ScreenPadding),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
             ) {
@@ -59,7 +59,7 @@ internal fun <T> DeviceConnectionList(
             )
         }
         if (devices.isEmpty() && !loading)
-            Text("Устройства не найдены", Modifier.padding(RemoteLayout.ScreenPadding))
+            Text("Устройства не найдены", Modifier.padding(horizontal = RemoteLayout.Gap, vertical = RemoteLayout.ScreenPadding))
     }
 }
 
@@ -69,26 +69,25 @@ internal fun DialogActionRow(
     selected: Boolean = false,
     loading: Boolean = false,
     enabled: Boolean = true,
+    highlightSelected: Boolean = true,
     onClick: () -> Unit,
 ) {
     val active = enabled && !loading
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val color =
-        if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+        if (selected && highlightSelected) MaterialTheme.colorScheme.onSecondaryContainer
         else MaterialTheme.colorScheme.onSurface
     Row(
         Modifier.fillMaxWidth()
             .heightIn(min = 56.dp)
             .clipToBounds()
-            .background(
-                if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
-            )
+            .background(if (selected && highlightSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .clickable(enabled = active, role = Role.Button, onClick = onClick)
             .semantics {
                 this.selected = selected
                 if (loading) stateDescription = "Подключение"
             }
-            .padding(horizontal = RemoteLayout.ScreenPadding, vertical = RemoteLayout.Gap),
+            .padding(horizontal = RemoteLayout.Gap, vertical = RemoteLayout.Gap),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(RemoteLayout.Gap),
     ) {
@@ -117,7 +116,8 @@ internal fun DialogActionRow(
 
 @Composable
 internal fun DialogToggleRow(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    belowevolve.shared.compose.AirToggleRow(label, checked, onChecked)
+    belowevolve.shared.compose.AirToggleRow(label, checked, onChecked,
+        contentPadding = PaddingValues(horizontal = RemoteLayout.Gap, vertical = RemoteLayout.SmallGap))
 }
 
 @Composable
@@ -130,7 +130,7 @@ internal fun DialogSliderRow(
 ) {
     Column(
         Modifier.fillMaxWidth()
-            .padding(horizontal = RemoteLayout.ScreenPadding, vertical = RemoteLayout.SmallGap)
+            .padding(horizontal = RemoteLayout.Gap, vertical = RemoteLayout.SmallGap)
     ) {
         Row(
             Modifier.fillMaxWidth(),

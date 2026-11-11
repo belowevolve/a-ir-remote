@@ -88,6 +88,7 @@ fun AirToggleRow(
   onChecked: (Boolean) -> Unit,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
+  contentPadding: PaddingValues = PaddingValues(horizontal = RemoteSpacing.Large.dp, vertical = RemoteSpacing.Small.dp),
 ) {
   Row(
     modifier
@@ -100,7 +101,7 @@ fun AirToggleRow(
         role = Role.Switch,
         onValueChange = onChecked,
       )
-      .padding(horizontal = RemoteSpacing.Large.dp, vertical = RemoteSpacing.Small.dp),
+      .padding(contentPadding),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(RemoteSpacing.Medium.dp),
   ) {

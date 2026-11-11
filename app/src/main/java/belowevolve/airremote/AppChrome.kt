@@ -160,6 +160,7 @@ internal fun <T : Any> RemoteDialog(
             }
         }
         CaptureDialogVolumeKeys()
+        val scroll = rememberScrollState()
         Surface(
             modifier =
                 Modifier.padding(
@@ -177,7 +178,9 @@ internal fun <T : Any> RemoteDialog(
             ) {
                 ProvideTextStyle(MaterialTheme.typography.titleLarge) { title(screen) }
                 Column(
-                    Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
+                    Modifier.weight(1f, fill = false).fillMaxWidth()
+                        .scrollFade(scroll, MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .verticalScroll(scroll)
                 ) {
                     ProvideTextStyle(MaterialTheme.typography.bodyMedium) { text(screen) }
                 }
