@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="138" height="42" viewBox="0 0 138 42">
-  <rect x=".5" y=".5" width="137" height="41" rx="11.5" fill="#20301f" stroke="#506649"/>
-  <g fill="none" stroke="#bced91" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="15" y="12" width="20" height="14" rx="2"/>
-    <path d="M25 26v4m-5 0h10"/>
-  </g>
-  <text x="45" y="26" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="700" fill="#edf5e7">Air Home</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="224" height="56" viewBox="0 0 224 56">
+  <defs><linearGradient id="surface" x2="1" y2="1"><stop stop-color="#243428"/><stop offset="1" stop-color="#151f18"/></linearGradient></defs>
+  <rect x=".5" y=".5" width="223" height="55" rx="13.5" fill="url(#surface)" stroke="#425746"/>
+  <rect x="12" y="12" width="32" height="32" rx="10" fill="#bced91"/>
+  <g fill="none" stroke="#25451c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="20" width="20" height="13" rx="2"/><path d="M28 33v4m-5 0h10"/></g>
+  <g font-family="Arial,Helvetica,sans-serif"><text x="56" y="25" font-size="14" font-weight="700" fill="#eef6e9">Air Home</text><text x="56" y="41" font-size="11" fill="#a5b6a0">Android TV · APK</text></g>
+  <path d="M202 21v11m-4-4 4 4 4-4" fill="none" stroke="#bced91" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
