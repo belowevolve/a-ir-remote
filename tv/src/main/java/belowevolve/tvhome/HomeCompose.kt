@@ -62,7 +62,7 @@ internal fun preparePosterArt(
 }
 
 @Composable
-internal fun HomeTheme(theme: WallpaperTheme? = null, content: @Composable () -> Unit) {
+internal fun HomeTheme(theme: WallpaperTheme? = Ui.currentTheme, content: @Composable () -> Unit) {
   val colors =
     theme?.colors
       ?: intArrayOf(Ui.BG, Ui.TEXT, Ui.MUTED, Ui.PANEL, Ui.PRIMARY, Ui.ON_PRIMARY, Ui.PRESSED)

@@ -7,12 +7,18 @@ import android.graphics.*
 import android.graphics.drawable.*
 import android.view.*
 import android.widget.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import belowevolve.shared.design.RemoteIcons
 import belowevolve.shared.design.RemotePalette
 import belowevolve.shared.design.RemoteShapes
 import belowevolve.shared.design.RemoteSpacing
 
 object Ui {
+    var currentTheme: WallpaperTheme? by mutableStateOf(null)
+        private set
+
     // Cached wallpaper roles; Air Remote's base palette is the first-launch fallback.
     var BG: Int = RemotePalette.Background
     var TEXT: Int = RemotePalette.Text
@@ -32,6 +38,9 @@ object Ui {
         PRIMARY = colors[4]
         ON_PRIMARY = colors[5]
         PRESSED = colors[6]
+        val previous = currentTheme
+        if (previous == null || previous.seed != theme.seed || !previous.colors.contentEquals(colors))
+            currentTheme = theme
     }
 
     fun dp(c: Context, n: Float): Int {
