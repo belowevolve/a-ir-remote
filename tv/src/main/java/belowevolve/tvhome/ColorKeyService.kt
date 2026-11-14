@@ -32,8 +32,14 @@ class ColorKeyService : AccessibilityService() {
             object : ColorKeyActions.Host {
                 override fun prepare(action: String): ColorKeyActions.Target? {
                     val prepared: Actions.PreparedAction? =
-                        Actions.prepare(this@ColorKeyService, action)
+                        Actions.prepare(
+                            this@ColorKeyService,
+                            action,
+                            Hdmi.isForeground(this@ColorKeyService, activeWindowPackage(), lastVisible),
+                        )
                     if (prepared == null) return null
+                    if (action == "hdmi-toggle")
+                        android.util.Log.i("AirKeys", "HDMI_TOGGLE target=${prepared.initial.component}")
                     return object : ColorKeyActions.Target {
                         override fun launch() {
                             WakeTrace.record(this@ColorKeyService, "launch_" + action)
@@ -186,11 +192,14 @@ class ColorKeyService : AccessibilityService() {
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg: String = (e.getPackageName()).toString()
         val cls: String = (e.getClassName()).toString()
+        // A volume/settings window does not turn the underlying PC screen into another source.
+        if (lastVisible == "hdmi" && Hdmi.isSystemOverlay(pkg)) return
         var role: String? = null
         if (dreamPackages.contains(pkg)) {
             role = "dream"
             inspectDreamWindow()
         } else if (pkg == "mov.film") role = "film"
+        else if (pkg == Hdmi.NATIVE_PACKAGE && cls.endsWith("TurnkeyUiMainActivity")) role = "hdmi"
         else if (pkg == getPackageName()) {
             if (cls.endsWith("HomeActivity")) role = "home"
             else if (cls.endsWith("HdmiActivity")) role = "hdmi"

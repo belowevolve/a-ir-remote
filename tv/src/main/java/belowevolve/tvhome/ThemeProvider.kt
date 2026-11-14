@@ -8,16 +8,19 @@ import android.os.Bundle
 import android.os.Binder
 import android.os.Process
 
-/** Read-only colors and button labels. Clients never need our private signing key. */
+/** Public read-only colors; button bindings remain restricted to film.mov. */
 class ThemeProvider : ContentProvider() {
     override fun onCreate() = true
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val context = requireNotNull(context)
-        context.enforceCallingOrSelfPermission(
-            "belowevolve.tvhome.permission.READ_THEME",
-            "Theme client must declare READ_THEME",
-        )
+        if (method == "hdmi-state") {
+            check(Binder.getCallingUid() == Process.myUid()) { "HDMI state is internal to Air Home" }
+            return Bundle().apply {
+                putBoolean("foreground", HdmiActivity.isForeground)
+                putString("input", context.getSharedPreferences("home", 0).getString("last_hdmi", Hdmi.DEFAULT_INPUT))
+            }
+        }
         if (method == "bindings") {
             val caller = Binder.getCallingUid()
             check(caller == Process.myUid() || context.packageManager.getPackagesForUid(caller)?.contains("mov.film") == true) {

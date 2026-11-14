@@ -1,6 +1,5 @@
 package belowevolve.tvhome
 
-import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -215,7 +214,7 @@ class HdmiActivity : QuietActivity() {
         if (requested == null)
             requested =
                 getSharedPreferences("home", 0)
-                    .getString("last_hdmi", "com.mediatek.tvinput/.hdmi.HDMIInputService/HW8")
+                    .getString("last_hdmi", Hdmi.DEFAULT_INPUT)
         for (info: TvInputInfo in
             getSystemService<TvInputManager>(TvInputManager::class.java).getTvInputList()) if (
             info.getType() == TvInputInfo.TYPE_HDMI && info.getId() == requested
@@ -427,14 +426,7 @@ class HdmiActivity : QuietActivity() {
     }
 
     companion object {
-        var isForeground: Boolean = false
+        @Volatile var isForeground: Boolean = false
             private set
-
-        fun intent(context: Context, input: String?): Intent {
-            val intent: Intent =
-                Intent(context, HdmiActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (input != null) intent.putExtra("input", input)
-            return intent
-        }
     }
 }

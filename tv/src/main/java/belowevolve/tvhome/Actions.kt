@@ -96,12 +96,12 @@ object Actions {
     }
 
     /* Resolve stateful bindings once, before HOME/dream callbacks can change foreground state. */
-    fun prepare(c: Context, action: String): PreparedAction? {
+    fun prepare(c: Context, action: String, hdmiForeground: Boolean = HdmiActivity.isForeground): PreparedAction? {
         try {
             var i: Intent?
             if ("hdmi-toggle" == action)
-                i = if (HdmiActivity.isForeground) homeIntent(c) else HdmiActivity.intent(c, null)
-            else if ("hdmi-open" == action) i = HdmiActivity.intent(c, null)
+                i = if (hdmiForeground) homeIntent(c) else Hdmi.intent(c, null)
+            else if ("hdmi-open" == action) i = Hdmi.intent(c, null)
             else if ("next-wallpaper" == action) i = homeIntent(c).putExtra("next_wallpaper", true)
             else if ("inputs" == action)
                 i = Intent(c, SettingsActivity::class.java).putExtra("section", "inputs")

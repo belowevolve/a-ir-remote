@@ -27,12 +27,28 @@ object AppCatalog {
 
   class App(val packageName: String, val label: String, val icon: Bitmap)
 
-  fun load(context: Context): ArrayList<App> {
+  fun hidden(context: Context): Set<String> =
+    context.getSharedPreferences("apps", 0).getStringSet("hidden", emptySet())?.toSet().orEmpty()
+
+  fun setHidden(context: Context, packageName: String, hide: Boolean) {
+    val packages = hidden(context).toMutableSet()
+    if (hide) packages.add(packageName) else packages.remove(packageName)
+    context.getSharedPreferences("apps", 0).edit().putStringSet("hidden", packages).apply()
+  }
+
+  private fun visible(context: Context, apps: List<App>, includeHidden: Boolean): ArrayList<App> {
+    val hidden = if (includeHidden) emptySet() else hidden(context)
+    return ArrayList(apps.filterNot { it.packageName in hidden })
+  }
+
+  fun load(context: Context, includeHidden: Boolean = false): ArrayList<App> {
     val pm: PackageManager = context.getPackageManager()
     val version =
-      pm.getInstalledPackages(0).joinToString { "${it.packageName}:${it.lastUpdateTime}" }
+      pm.getInstalledPackages(0).joinToString {
+        "${it.packageName}:${it.lastUpdateTime}:${it.applicationInfo?.enabled}"
+      }
     synchronized(this) {
-      if (version == packagesKey && cached.isNotEmpty()) return ArrayList(cached)
+      if (version == packagesKey && cached.isNotEmpty()) return visible(context, cached, includeHidden)
     }
     val apps: LinkedHashMap<String, App> = LinkedHashMap<String, App>()
     for (category: String in
@@ -62,6 +78,6 @@ object AppCatalog {
       cached = result
       packagesKey = version
     }
-    return result
+    return visible(context, result, includeHidden)
   }
 }

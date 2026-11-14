@@ -23,9 +23,13 @@ class SettingsActivity : QuietActivity() {
   private var page by mutableStateOf("main")
   private var colorCode by mutableIntStateOf(183)
   private var mediaAccess by mutableStateOf(false)
+  private var cadenceRecovery by mutableStateOf(true)
+  private var appsRevision by mutableIntStateOf(0)
 
   override fun onResume() {
     super.onResume()
+    appsRevision++
+    cadenceRecovery = DisplayCadenceRecovery.enabled(this)
     mediaAccess = getSystemService(android.app.NotificationManager::class.java)
       .isNotificationListenerAccessGranted(ComponentName(this, MediaAccessService::class.java))
   }
@@ -51,7 +55,8 @@ class SettingsActivity : QuietActivity() {
   }
 
   override fun onRemoteBack() {
-    if (page.startsWith("key:")) page = "keys" else if (page != "main") page = "main" else finish()
+    if (page == "app-visibility") page = "apps"
+    else if (page.startsWith("key:")) page = "keys" else if (page != "main") page = "main" else finish()
   }
 
   override fun dispatchKeyEvent(e: KeyEvent): Boolean {
@@ -81,9 +86,14 @@ class SettingsActivity : QuietActivity() {
   @Composable
   private fun SettingsScreen() {
     var apps by remember { mutableStateOf(emptyList<AppCatalog.App>()) }
-    LaunchedEffect(page) {
-      if (page == "apps" || page.startsWith("key:"))
-        apps = withContext(Dispatchers.IO) { AppCatalog.load(this@SettingsActivity) }
+    var hiddenApps by remember { mutableStateOf(AppCatalog.hidden(this@SettingsActivity)) }
+    LaunchedEffect(page, appsRevision) {
+      if (page == "apps" || page == "app-visibility" || page.startsWith("key:")) {
+        hiddenApps = AppCatalog.hidden(this@SettingsActivity)
+        apps = withContext(Dispatchers.IO) {
+          AppCatalog.load(this@SettingsActivity, includeHidden = page == "app-visibility")
+        }
+      }
     }
     val inputs = if (page == "inputs") rememberHdmiChoices() else emptyList()
     val preferredInput = remember(page) { inputs.getOrNull(preferredHdmiIndex(inputs))?.id }
@@ -93,6 +103,7 @@ class SettingsActivity : QuietActivity() {
         "main" -> "Настройки"
         "inputs" -> "Входы HDMI"
         "apps" -> "Приложения"
+        "app-visibility" -> "Видимость приложений"
         "keys" -> "Кнопки пульта"
         "wallpapers" -> "Фоны"
         else -> names[colorCode - 183]
@@ -141,12 +152,20 @@ class SettingsActivity : QuietActivity() {
                           RemoteIcons.Settings,
                           "android",
                         ),
-                      )
+                      ).toMutableList().apply {
+                        if (DisplayCadenceRecovery.supported)
+                          add(size - 1, Triple("Плавность интерфейса", R.drawable.ic_remote, "display-cadence"))
+                      }
                     entries.forEach { (text, icon, target) ->
                       @Composable
                       fun action(modifier: Modifier) {
-                        TvAction(text, modifier.fillMaxWidth(), icon) {
+                        TvAction(text, modifier.fillMaxWidth(), icon,
+                          trailingText = if (target == "display-cadence") (if (cadenceRecovery) "Авто" else "Выключено") else null) {
                           when (target) {
+                            "display-cadence" -> {
+                              cadenceRecovery = !cadenceRecovery
+                              DisplayCadenceRecovery.setEnabled(this@SettingsActivity, cadenceRecovery)
+                            }
                             "theme" ->
                               startActivity(
                                 Intent(
@@ -207,7 +226,7 @@ class SettingsActivity : QuietActivity() {
                             }
                           },
                         ) {
-                          startActivity(HdmiActivity.intent(this@SettingsActivity, input.id))
+                          startActivity(Hdmi.intent(this@SettingsActivity, input.id))
                         }
                       }
                       if (input.id == preferredInput) FocusFirst { action(it) }
@@ -241,6 +260,12 @@ class SettingsActivity : QuietActivity() {
                       if (code == 183) FocusFirst { action(it) } else action(Modifier)
                     }
                   else -> {
+                    if (page == "apps")
+                      FocusFirst {
+                        TvAction("Видимость приложений", it.fillMaxWidth(), RemoteIcons.Tune) {
+                          page = "app-visibility"
+                        }
+                      }
                     if (page.startsWith("key:")) {
                       val actions =
                         listOf(
@@ -277,8 +302,14 @@ class SettingsActivity : QuietActivity() {
                           app.label,
                           modifier = modifier.fillMaxWidth(),
                           leading = { AppIcon(app.icon, Modifier.size(24.dp)) },
+                          trailingText = if (page == "app-visibility")
+                            (if (app.packageName in hiddenApps) "Скрыто" else "Показывается") else null,
                           onClick = {
-                            if (page.startsWith("key:")) {
+                            if (page == "app-visibility") {
+                              AppCatalog.setHidden(this@SettingsActivity, app.packageName,
+                                hide = app.packageName !in hiddenApps)
+                              hiddenApps = AppCatalog.hidden(this@SettingsActivity)
+                            } else if (page.startsWith("key:")) {
                               Actions.setBinding(this@SettingsActivity, colorCode, app.packageName)
                               page = "keys"
                             } else
@@ -289,7 +320,7 @@ class SettingsActivity : QuietActivity() {
                           },
                         )
                       }
-                      if (page == "apps" && app == apps.firstOrNull()) FocusFirst { entry(it) }
+                      if (page == "app-visibility" && app == apps.firstOrNull()) FocusFirst { entry(it) }
                       else entry(Modifier)
                     }
                   }

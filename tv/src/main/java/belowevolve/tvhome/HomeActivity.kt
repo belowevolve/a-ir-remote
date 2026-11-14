@@ -16,6 +16,7 @@ import kotlinx.coroutines.*
 class HomeActivity : QuietActivity() {
   private val main = Handler(Looper.getMainLooper())
   private val scope = MainScope()
+  private val displayCadence by lazy { DisplayCadenceRecovery(this) }
   private var background by mutableStateOf<Bitmap?>(null)
   private var theme by mutableStateOf<WallpaperTheme?>(null)
   private var posters by mutableStateOf(emptyList<PosterArt>())
@@ -230,7 +231,7 @@ class HomeActivity : QuietActivity() {
       return
     }
     if (value.getBooleanExtra("hdmi", false) || value.getBooleanExtra("hdmi_toggle", false))
-      startActivity(HdmiActivity.intent(this, value.getStringExtra("input")))
+      startActivity(Hdmi.intent(this, value.getStringExtra("input")))
     else focusRequest++
   }
 
@@ -298,9 +299,11 @@ class HomeActivity : QuietActivity() {
     tick.run()
     loadPrograms()
     wallpapers.resume()
+    displayCadence.resume()
   }
 
   override fun onPause() {
+    displayCadence.pause()
     main.removeCallbacks(tick)
     super.onPause()
   }
