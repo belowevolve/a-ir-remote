@@ -186,6 +186,15 @@ def remove_launch_flash(tree):
     manifest = ET.parse(tree / 'AndroidManifest.xml')
     start = next((a for a in manifest.findall('application/activity')
                   if a.get(ANDROID + 'name') == 'mov.film.StartActivity'), None)
+    if start is None:
+        # 253 keeps the launcher name as an alias of a thin StartEntry subclass.
+        alias = next((a for a in manifest.findall('application/activity-alias')
+                      if a.get(ANDROID + 'name') == 'mov.film.StartActivity'), None)
+        entry = tree / 'smali/mov/film/StartEntry.smali'
+        if (alias is not None and alias.get(ANDROID + 'targetActivity') == 'mov.film.StartEntry'
+                and entry.exists() and '.super Lmov/film/StartActivity;' in entry.read_text()):
+            start = next((a for a in manifest.findall('application/activity')
+                          if a.get(ANDROID + 'name') == 'mov.film.StartEntry'), None)
     if start is None or start.get(ANDROID + 'theme') not in (None, '@style/AppTheme.Launch'):
         raise Incompatible('Start activity theme changed')
     for qualifier in ['values', 'values-v31']:
@@ -357,7 +366,6 @@ def main():
                 spec.loader.exec_module(dynamic)
                 stats.update(dynamic.inject(decoded, palette, palette_map(palette), palette_roles(), build, java, env, command, run, Incompatible, phone=args.phone_theme))
                 if not args.phone_theme:
-                    ET.SubElement(manifest.getroot(), 'uses-permission', {ANDROID + 'name': 'belowevolve.tvhome.permission.READ_THEME'})
                     queries = manifest.find('queries')
                     if queries is None: queries = ET.SubElement(manifest.getroot(), 'queries')
                     ET.SubElement(queries, 'provider', {ANDROID + 'authorities': 'belowevolve.tvhome.theme'})

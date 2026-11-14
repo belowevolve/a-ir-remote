@@ -43,7 +43,7 @@ def main():
         run('patch_badges.py', current, '--output', work / 'badges.apk', '--apktool', apktool)
         current = work / 'badges.apk'
         if not args.phone:
-            for script in ['patch_player_lifecycle.py', 'patch_media_session.py']:
+            for script in ['patch_player_lifecycle.py', 'patch_media_session.py', 'patch_video_lifecycle.py']:
                 patched = work / (Path(script).stem + '.apk')
                 run(script, current, '--output', patched)
                 current = patched

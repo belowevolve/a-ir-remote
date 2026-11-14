@@ -10,11 +10,13 @@ import org.jf.dexlib2.writer.pool.DexPool;
 public final class FilmDexClass {
     static final String TYPE = "Lmov/film/PlayerActivity;";
     public static void main(String[] args) throws Exception {
+        String type = args.length > (args[0].equals("decode") ? 3 : 4)
+            ? args[args[0].equals("decode") ? 3 : 4] : TYPE;
         DexFile original = DexFileFactory.loadDexFile(new File(args[1]), Opcodes.forApi(28));
         if (args[0].equals("decode")) {
             BaksmaliOptions options = new BaksmaliOptions(); options.debugInfo = false;
-            if (!Baksmali.disassembleDexFile(original, new File(args[2]), 1, options, Collections.singletonList(TYPE)))
-                throw new IllegalStateException("Could not decode player");
+            if (!Baksmali.disassembleDexFile(original, new File(args[2]), 1, options, Collections.singletonList(type)))
+                throw new IllegalStateException("Could not decode class");
         } else if (args[0].equals("media")) {
             ClassDef replacement = null;
             if (!args[2].equals("-")) {
@@ -35,10 +37,10 @@ public final class FilmDexClass {
             DexFile patch = DexFileFactory.loadDexFile(new File(args[2]), Opcodes.forApi(28));
             if (patch.getClasses().size() != 1) throw new IllegalStateException("Unexpected patched classes");
             ClassDef replacement = patch.getClasses().iterator().next();
-            if (!replacement.getType().equals(TYPE)) throw new IllegalStateException("Unexpected player type");
+            if (!replacement.getType().equals(type)) throw new IllegalStateException("Unexpected replacement type");
             List<ClassDef> result = new ArrayList<>(); int replaced = 0;
             for (ClassDef item : original.getClasses()) {
-                if (item.getType().equals(TYPE)) { result.add(replacement); replaced++; }
+                if (item.getType().equals(type)) { result.add(replacement); replaced++; }
                 else result.add(item);
             }
             if (replaced != 1) throw new IllegalStateException("Player class missing or duplicated");

@@ -107,8 +107,13 @@ public final class PatchEngine {
             Files.write(target.toPath(), text.getBytes(StandardCharsets.UTF_8));
         }
     }
-    private static IOException incompatible(String where) {
-        return new IOException("Структура film.mov изменилась (" + where + "). Нужна новая версия патча. Установленное приложение сохранено.");
+    public static final class IncompatibleException extends IOException {
+        IncompatibleException(String where) {
+            super("Патч несовместим с новой версией film.mov. Нужен обновлённый патч, подготовленный на компьютере. Повторная загрузка не поможет. Текущая версия и данные сохранены.\n\nПодробности: " + where);
+        }
+    }
+    private static IncompatibleException incompatible(String where) {
+        return new IncompatibleException(where);
     }
     private static Map<String, Entry> entries(TableBlock table) {
         Map<String, Entry> result = new LinkedHashMap<>();
@@ -182,19 +187,21 @@ public final class PatchEngine {
     public static File patch(File source, File self, File work, Progress progress) throws Exception {
         if (!UPSTREAM.equals(signer(source))) throw new IOException("Подпись автора film.mov не совпадает");
         work.mkdirs(); File tree = new File(work, "smali");
-        progress.at("Применяю патчи оформления и интеграции…");
-        decode(source, tree);
         File unsigned = new File(work, "unsigned.apk"), result = new File(work, "ready.apk");
         try (ZipFile app = new ZipFile(self)) {
             File recipeFile = new File(work, "recipe.zip");
             Files.write(recipeFile.toPath(), entry(app, ASSETS + "recipe.zip"));
             try (ZipFile template = new ZipFile(recipeFile); ZipFile input = new ZipFile(source)) {
                 JSONObject recipe = new JSONObject(new String(entry(template, "recipe.json"), StandardCharsets.UTF_8));
+                // Check compatibility before the expensive DEX decode/assembly.
+                progress.at("Проверяю совместимость патча…");
+                byte[] manifest = manifest(input, template), resources = resources(input, template);
+                progress.at("Применяю патчи оформления и интеграции…");
+                decode(source, tree);
                 code(tree, recipe, template);
                 SmaliOptions options = new SmaliOptions(); options.apiLevel=28; options.jobs=2;
                 options.outputDexFile = new File(work, "classes.dex").getPath();
                 if (!Smali.assemble(options, tree.getPath())) throw new IOException("Не удалось собрать DEX");
-                byte[] manifest = manifest(input, template), resources = resources(input, template);
                 Map<String, byte[]> replacements = new HashMap<>();
                 JSONArray files = recipe.getJSONArray("files");
                 for (int i=0;i<files.length();i++) {

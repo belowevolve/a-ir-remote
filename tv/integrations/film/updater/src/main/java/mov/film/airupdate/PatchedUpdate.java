@@ -41,6 +41,7 @@ public final class PatchedUpdate {
         if (!BUSY.compareAndSet(false,true)) {dialog.dismiss();return;}
         new Thread(() -> {
             File work=new File(activity.getCacheDir(),"airupdate-work");
+            String versions="";
             try {
                 JSONObject release = new JSONObject(new String(download(RELEASE,1024*1024),java.nio.charset.StandardCharsets.UTF_8));
                 if(release.optBoolean("draft") || release.optBoolean("prerelease"))throw new IOException("Не найден стабильный релиз");
@@ -48,6 +49,7 @@ public final class PatchedUpdate {
                 if(!tag.matches("v4\\.0-[0-9]+"))throw new IOException("Для этой версии film.mov нужен новый патч");
                 int code=Integer.parseInt(tag.substring(tag.lastIndexOf('-')+1));
                 PackageInfo installed=activity.getPackageManager().getPackageInfo(activity.getPackageName(),0);
+                versions="Установлено: "+installed.versionName+" ("+installed.versionCode+"). Доступно: "+tag.substring(1)+".\n\n";
                 if(code<=installed.versionCode) {
                     MAIN.post(()->{if(live(activity)){dialog.dismiss();new AlertDialog.Builder(activity).setTitle(TITLE).setMessage("Уже установлена последняя версия: "+installed.versionName+" ("+installed.versionCode+") с патчем.").setPositiveButton("Хорошо",null).show();}});
                     return;
@@ -59,14 +61,10 @@ public final class PatchedUpdate {
                 if(!url.equals("https://github.com/gamahacka/filmmov/releases/download/"+tag+"/filmmov.apk"))throw new IOException("Неожиданный адрес APK");
                 String digest=apk.getString("digest");
                 if(!digest.matches("sha256:[0-9a-f]{64}"))throw new IOException("В релизе нет контрольной суммы APK");
-                clear(work);work.mkdirs();
-                progress(activity,dialog,"Скачиваю film.mov "+tag.substring(1)+"…");
-                byte[] bytes=download(url,MAX_APK);
-                if(!PatchEngine.hash(bytes).equals(digest.substring(7)))throw new IOException("Контрольная сумма APK не совпадает");
-                File original=new File(work,"original.apk");java.nio.file.Files.write(original.toPath(),bytes);
+                File original=source(work,url,digest.substring(7),s->progress(activity,dialog,s));
                 PackageInfo pkg=activity.getPackageManager().getPackageArchiveInfo(original.getPath(),0);
                 if(pkg==null || !"mov.film".equals(pkg.packageName) || pkg.versionCode!=code)throw new IOException("Версия внутри APK не совпадает с релизом");
-                File patched=PatchEngine.patch(original,new File(activity.getApplicationInfo().sourceDir),new File(work,"build"),s->progress(activity,dialog,s));
+                File patched=prepare(original,activity,work,s->progress(activity,dialog,s));
                 MAIN.post(()->{
                     if(!live(activity))return;
                     dialog.dismiss();
@@ -76,11 +74,53 @@ public final class PatchedUpdate {
                 });
             } catch(Exception | LinkageError error) {
                 android.util.Log.e("AirUpdate","Update failed",error);
-                MAIN.post(()->{if(live(activity)){dialog.dismiss();new AlertDialog.Builder(activity).setTitle("Обновление не установлено").setMessage(error.getMessage()==null?error.toString():error.getMessage()).setPositiveButton("Хорошо",null).show();}});
+                boolean incompatible=error instanceof PatchEngine.IncompatibleException;
+                String details=versions+(error.getMessage()==null?error.toString():error.getMessage());
+                MAIN.post(()->{if(live(activity)){
+                    dialog.dismiss();
+                    AlertDialog.Builder message=new AlertDialog.Builder(activity)
+                        .setTitle(incompatible?"Нужен обновлённый патч":"Обновление не установлено")
+                        .setMessage(details).setNegativeButton("Закрыть",null)
+                        .setNeutralButton("Скопировать",(d,w)->{
+                            android.content.ClipboardManager clipboard=(android.content.ClipboardManager)activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                            clipboard.setPrimaryClip(ClipData.newPlainText(TITLE,details));
+                        });
+                    if(!incompatible)message.setPositiveButton("Повторить",(d,w)->show(activity));
+                    message.show();
+                }});
             } finally {BUSY.set(false);}
         },"film-local-update").start();
     }
     private static void progress(Activity a,ProgressDialog dialog,String text){MAIN.post(()->{if(live(a))dialog.setMessage(text);});}
+    private static File source(File work,String url,String expected,PatchEngine.Progress progress) throws Exception {
+        if(!work.isDirectory()&&!work.mkdirs())throw new IOException("Не удалось создать папку обновления");
+        File original=new File(work,"original.apk");
+        if(original.isFile()&&original.length()<=MAX_APK
+                &&PatchEngine.hash(java.nio.file.Files.readAllBytes(original.toPath())).equalsIgnoreCase(expected)) {
+            progress.at("Использую уже скачанный и проверенный APK…");
+            return original;
+        }
+        progress.at("Скачиваю новую версию film.mov…");
+        byte[] bytes=download(url,MAX_APK);
+        if(!PatchEngine.hash(bytes).equalsIgnoreCase(expected))throw new IOException("Контрольная сумма APK не совпадает");
+        java.nio.file.Files.write(original.toPath(),bytes);
+        return original;
+    }
+    private static File prepare(File original,Context context,File work,PatchEngine.Progress progress) throws Exception {
+        File self=new File(context.getApplicationInfo().sourceDir),build=new File(work,"build");
+        File ready=new File(build,"ready.apk"),stamp=new File(work,"ready.sha256");
+        String identity=PatchEngine.hash(java.nio.file.Files.readAllBytes(original.toPath()))+":"
+            +PatchEngine.hash(java.nio.file.Files.readAllBytes(self.toPath()));
+        if(ready.isFile()&&stamp.isFile()) {
+            String saved=new String(java.nio.file.Files.readAllBytes(stamp.toPath()),java.nio.charset.StandardCharsets.UTF_8);
+            if(saved.equals(identity)&&PatchEngine.signer(ready).equals(PatchEngine.signer(self)))return ready;
+        }
+        // Keep the verified download; discard only incomplete build output.
+        clear(build);java.nio.file.Files.deleteIfExists(stamp.toPath());
+        File patched=PatchEngine.patch(original,self,build,progress);
+        java.nio.file.Files.write(stamp.toPath(),identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return patched;
+    }
     private static byte[] download(String url,long limit) throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL(url).openConnection();
         c.setConnectTimeout(20000);c.setReadTimeout(30000);c.setRequestProperty("User-Agent","film.mov-AirUpdate");
@@ -129,13 +169,12 @@ public final class PatchedUpdate {
             String url=(String)found.getClass().getField("apk").get(found);
             String expected=(String)found.getClass().getField("sha256").get(found);
             if(!url.startsWith("https://"))throw new IOException("Нужен HTTPS для обновления");
-            byte[] bytes=download(url,MAX_APK);
-            if(expected==null || !expected.matches("[0-9a-fA-F]{64}") || !PatchEngine.hash(bytes).equalsIgnoreCase(expected))throw new IOException("Контрольная сумма APK не совпадает");
-            File work=new File(context.getCacheDir(),"airupdate-native");clear(work);work.mkdirs();
-            File source=new File(work,"original.apk");java.nio.file.Files.write(source.toPath(),bytes);
+            if(expected==null || !expected.matches("[0-9a-fA-F]{64}"))throw new IOException("Нет контрольной суммы APK");
+            File work=new File(context.getCacheDir(),"airupdate-native");
+            File source=source(work,url,expected,s->android.util.Log.i("AirUpdate",s));
             PackageInfo candidate=context.getPackageManager().getPackageArchiveInfo(source.getPath(),0);
             if(candidate==null || !"mov.film".equals(candidate.packageName) || candidate.versionCode<=context.getPackageManager().getPackageInfo("mov.film",0).versionCode)throw new IOException("Неверная версия APK");
-            File ready=PatchEngine.patch(source,new File(context.getApplicationInfo().sourceDir),new File(work,"build"),s->android.util.Log.i("AirUpdate",s));
+            File ready=prepare(source,context,work,s->android.util.Log.i("AirUpdate",s));
             install(context,ready);return "";
         }catch(Exception | LinkageError e){android.util.Log.e("AirUpdate","Native update failed",e);return e.getMessage()==null?e.toString():e.getMessage();}
         finally{BUSY.set(false);}
