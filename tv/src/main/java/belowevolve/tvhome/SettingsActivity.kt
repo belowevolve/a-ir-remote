@@ -146,7 +146,7 @@ class SettingsActivity : QuietActivity() {
                         ),
                         Triple("Тема", R.drawable.ic_palette, "theme"),
                         Triple("Приложения", R.drawable.ic_apps, "apps"),
-                        Triple(if (mediaAccess) "Управление медиа: включено" else "Управление медиа", R.drawable.ic_remote, "media-access"),
+                        Triple("Управление медиа", R.drawable.ic_media_control, "media-access"),
                         Triple(
                           "Настройки Android TV",
                           RemoteIcons.Settings,
@@ -154,13 +154,17 @@ class SettingsActivity : QuietActivity() {
                         ),
                       ).toMutableList().apply {
                         if (DisplayCadenceRecovery.supported)
-                          add(size - 1, Triple("Плавность интерфейса", R.drawable.ic_remote, "display-cadence"))
+                          add(size - 1, Triple("Плавность интерфейса", R.drawable.ic_display_motion, "display-cadence"))
                       }
                     entries.forEach { (text, icon, target) ->
                       @Composable
                       fun action(modifier: Modifier) {
                         TvAction(text, modifier.fillMaxWidth(), icon,
-                          trailingText = if (target == "display-cadence") (if (cadenceRecovery) "Авто" else "Выключено") else null) {
+                          trailingText = when (target) {
+                            "media-access" -> if (mediaAccess) "Включено" else "Выключено"
+                            "display-cadence" -> if (cadenceRecovery) "Авто" else "Выключено"
+                            else -> null
+                          }) {
                           when (target) {
                             "display-cadence" -> {
                               cadenceRecovery = !cadenceRecovery
