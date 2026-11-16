@@ -46,7 +46,7 @@ public final class PatchedUpdate {
                 JSONObject release = new JSONObject(new String(download(RELEASE,1024*1024),java.nio.charset.StandardCharsets.UTF_8));
                 if(release.optBoolean("draft") || release.optBoolean("prerelease"))throw new IOException("Не найден стабильный релиз");
                 String tag=release.getString("tag_name");
-                if(!tag.matches("v4\\.0-[0-9]+"))throw new IOException("Для этой версии film.mov нужен новый патч");
+                if(!tag.matches("v4\\.[01]-[0-9]+"))throw new IOException("Для этой версии film.mov нужен новый патч");
                 int code=Integer.parseInt(tag.substring(tag.lastIndexOf('-')+1));
                 PackageInfo installed=activity.getPackageManager().getPackageInfo(activity.getPackageName(),0);
                 versions="Установлено: "+installed.versionName+" ("+installed.versionCode+"). Доступно: "+tag.substring(1)+".\n\n";

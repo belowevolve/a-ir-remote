@@ -39,18 +39,22 @@ def patch(text):
         return body
     text, count = re.subn(r'(?ms)^\.method protected (onStart|onStop)\(\)V\n.*?^\.end method', lifecycle, text)
     if count != 2: raise ValueError('Lifecycle methods missing')
-    calls = 0
+    calls = {}
     def play_calls(match):
-        nonlocal calls
         body = match.group(0)
         target = r'invoke-interface \{(\w+)\}, Landroidx/media3/common/Player;->play\(\)V'
         if not re.search(target, body): return body
         if ' static ' in body.splitlines()[0]: raise ValueError('Unexpected static playback call')
         body, n = re.subn(target, lambda m: 'invoke-direct {p0, ' + m.group(1) + '}, ' + TYPE + '->airPlay(Landroidx/media3/common/Player;)V', body)
-        calls += n
+        calls[body.splitlines()[0].split()[-1]] = n
         return body
     text = re.sub(r'(?ms)^\.method .*?^\.end method', play_calls, text)
-    if calls != 3: raise ValueError('Upstream playback call count changed: ' + str(calls))
+    expected = {'castOff(Ljava/lang/String;)V': 1, 'start()V': 1, 'toggle()V': 1}
+    # 4.1 adds local playback fallbacks when handing off to an external player.
+    external = {'outReady()V': 1, 'outResume()V': 1,
+                'outStart(Ljava/lang/String;)V': 2, 'onResume()V': 1}
+    if calls != expected and calls != dict(expected, **external):
+        raise ValueError('Upstream playback call layout changed: ' + str(calls))
     text += '''
 .method private airPlay(Landroidx/media3/common/Player;)V
     .locals 1
