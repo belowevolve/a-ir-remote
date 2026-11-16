@@ -954,7 +954,11 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             SetBkColor(w as HDC, v.card);
             v.card_brush as _
         }
-        WM_SETTINGCHANGE | WM_THEMECHANGED | WM_DWMCOLORIZATIONCOLORCHANGED | WM_DPICHANGED => {
+        WM_SETTINGCHANGE
+        | WM_THEMECHANGED
+        | WM_DWMCOLORIZATIONCOLORCHANGED
+        | WM_DPICHANGED
+        | WM_DISPLAYCHANGE => {
             if GetWindowLongPtrW(window, GWLP_USERDATA) == 0 {
                 return DefWindowProcW(window, msg, w, l);
             }
@@ -972,7 +976,6 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
             let current = &mut *(GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Visual);
             current.pairing = (*old).pairing;
             current.microphone_test = (*old).microphone_test.take();
-            layout(window);
             let mut tray: NOTIFYICONDATAW = std::mem::zeroed();
             tray.cbSize = size_of::<NOTIFYICONDATAW>() as _;
             tray.hWnd = window;
@@ -988,11 +991,16 @@ unsafe extern "system" fn procedure(window: HWND, msg: u32, w: WPARAM, l: LPARAM
                     null_mut(),
                     r.left,
                     r.top,
-                    r.right - r.left,
-                    r.bottom - r.top,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
             }
+            // The content scale is capped to the monitor work area. Windows'
+            // suggested size uses the uncapped DPI ratio and can clip that
+            // content after a scale decrease. Always derive the client size
+            // from the same scale used for QR, fonts and controls.
+            resize(window);
             RedrawWindow(window, null(), null_mut(), RDW_INVALIDATE | RDW_ALLCHILDREN);
             0
         }
