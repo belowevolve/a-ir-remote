@@ -102,6 +102,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     internal fun dump(out: java.io.PrintWriter) {
         out.println("AirRemote TV paired=$hasSelectedTv connected=$connected connecting=$connecting foreground=$foreground sessionJob=${connectionJob?.isActive == true}")
+        out.println("voiceRequested=$voiceRequested recording=$recording")
     }
     private val powerSignal: Pair<Int, IntArray>?
         get() {
@@ -664,10 +665,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     fun startVoice() {
         if (!foreground || !tvMode || voiceJob?.isActive == true) return
-        if (VoiceFeature.active) {
-            message = "Сначала останови голосовое управление в настройках ТВ"
-            return
-        }
         if (MicrophoneService.status.value.active) {
             message = "Сначала останови микрофон для ПК"
             return
@@ -680,40 +677,44 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         recording = true
         voiceRequested = false
         voiceJob = action {
-            var recorder: AudioRecord? = null
-            var id: Int? = null
             try {
-                id = client.startVoice()
-                val minimum = AudioRecord.getMinBufferSize(
-                    8000,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                )
-                check(minimum > 0) { "Микрофон не поддерживает формат записи" }
-                @Suppress("MissingPermission")
-                val input = AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    8000,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    maxOf(minimum, 8192),
-                )
-                recorder = input
-                check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон не готов" }
-                input.startRecording()
-                // Read 20 ms of PCM per network packet. Reading the full recorder
-                // buffer (8192 bytes) held back 512 ms at 8 kHz / 16-bit mono.
-                val buffer = ByteArray(8000 * 2 / 50)
-                val deadline = android.os.SystemClock.elapsedRealtime() + 30000
-                while (currentCoroutineContext().isActive && client.isVoiceActive(id) && android.os.SystemClock.elapsedRealtime() < deadline) {
-                    val count = input.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-                    check(count > 0) { "Ошибка записи микрофона: $count" }
-                    client.audio(id, buffer, count)
+                VoiceFeature.withMicrophone {
+                    var recorder: AudioRecord? = null
+                    var id: Int? = null
+                    try {
+                        id = client.startVoice()
+                        val minimum = AudioRecord.getMinBufferSize(
+                            8000,
+                            AudioFormat.CHANNEL_IN_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT,
+                        )
+                        check(minimum > 0) { "Микрофон не поддерживает формат записи" }
+                        @Suppress("MissingPermission")
+                        val input = AudioRecord(
+                            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                            8000,
+                            AudioFormat.CHANNEL_IN_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT,
+                            maxOf(minimum, 8192),
+                        )
+                        recorder = input
+                        check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон не готов" }
+                        input.startRecording()
+                        // Read 20 ms of PCM per network packet. Reading the full recorder
+                        // buffer (8192 bytes) held back 512 ms at 8 kHz / 16-bit mono.
+                        val buffer = ByteArray(8000 * 2 / 50)
+                        val deadline = android.os.SystemClock.elapsedRealtime() + 30000
+                        while (currentCoroutineContext().isActive && client.isVoiceActive(id) && android.os.SystemClock.elapsedRealtime() < deadline) {
+                            val count = input.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
+                            check(count > 0) { "Ошибка записи микрофона: $count" }
+                            client.audio(id, buffer, count)
+                        }
+                    } finally {
+                        recorder?.let { runCatching { it.stop() }; it.release() }
+                        id?.let { runCatching { client.endVoice(it) } }
+                    }
                 }
             } finally {
-                recorder?.let { runCatching { it.stop() }; it.release() }
-                id?.let { runCatching { client.endVoice(it) } }
-                // Do not overwrite a newer request while the previous session exits.
                 withContext(NonCancellable + Dispatchers.Main) { recording = false }
             }
         }

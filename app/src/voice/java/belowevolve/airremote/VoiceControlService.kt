@@ -26,9 +26,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class VoiceControlStatus(
@@ -38,10 +41,11 @@ internal data class VoiceControlStatus(
     val tvError: String? = null,
     val commandFailed: Boolean = false,
     val microphoneUnavailable: Boolean = false,
+    val microphoneBorrowed: Boolean = false,
 ) {
-    val description: String get() = if (active && !loading && !microphoneUnavailable && tvError != null && !commandFailed)
+    val description: String get() = if (active && !loading && !microphoneUnavailable && !microphoneBorrowed && tvError != null && !commandFailed)
         "Слушаю. $tvError" else message
-    val hasError: Boolean get() = tvError != null || commandFailed || microphoneUnavailable
+    val hasError: Boolean get() = !microphoneBorrowed && (tvError != null || commandFailed || microphoneUnavailable)
 }
 
 /** User-enabled local listening; the notification always exposes an immediate stop action. */
@@ -77,10 +81,6 @@ class VoiceControlService : Service() {
         }
         if (started) return START_STICKY
         try {
-            check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                "Разреши доступ к микрофону"
-            }
-            check(!MicrophoneService.status.value.active) { "Сначала останови микрофон для ПК" }
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL, "Голосовое управление", NotificationManager.IMPORTANCE_LOW),
             )
@@ -88,6 +88,9 @@ class VoiceControlService : Service() {
             if (android.os.Build.VERSION.SDK_INT >= 30)
                 startForeground(NOTIFICATION, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             else startForeground(NOTIFICATION, notification())
+            check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                "Разреши доступ к микрофону"
+            }
             started = true
             if (BuildConfig.DEBUG) regressionService = this
             wakeLock = getSystemService(PowerManager::class.java).newWakeLock(
@@ -133,8 +136,17 @@ class VoiceControlService : Service() {
             var retryDelay = 500L
             while (currentCoroutineContext().isActive) {
                 try {
-                    captureWith(recognizer)
-                    return
+                    if (microphoneUsers.value > 0) {
+                        mutableStatus.update { it.copy(active = true, loading = false,
+                            microphoneBorrowed = true, message = "Микрофон используется голосовым поиском или ПК") }
+                        notifyStatus()
+                    }
+                    microphoneUsers.first { it == 0 }
+                    microphoneLock.withLock {
+                        if (microphoneUsers.value == 0) captureWith(recognizer)
+                    }
+                    recognizer.reset()
+                    retryDelay = 500L
                 } catch (error: CancellationException) { throw error }
                 catch (error: SecurityException) { throw error }
                 catch (error: IllegalStateException) {
@@ -168,11 +180,11 @@ class VoiceControlService : Service() {
             try {
                 recorder = input
                 check(input.state == AudioRecord.STATE_INITIALIZED) { "Микрофон недоступен" }
-                if (!currentCoroutineContext().isActive) return
+                if (!currentCoroutineContext().isActive || microphoneUsers.value > 0) return
                 input.startRecording()
                 check(input.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Не удалось включить микрофон" }
                 mutableStatus.update { it.copy(active = true, loading = false,
-                    microphoneUnavailable = false, message = "Слушаю команды") }
+                    microphoneUnavailable = false, microphoneBorrowed = false, message = "Слушаю команды") }
                 notifyStatus()
                 val samples = ShortArray(OfflineVoiceRecognizer.FRAME_SAMPLES)
                 var lastSilenceCheck = 0L
@@ -180,7 +192,7 @@ class VoiceControlService : Service() {
                 Log.i(TAG, "Listening locally: sampleRate=$rate")
                 while (currentCoroutineContext().isActive) {
                     val count = input.read(samples, 0, samples.size, AudioRecord.READ_BLOCKING)
-                    if (!currentCoroutineContext().isActive) break
+                    if (!currentCoroutineContext().isActive || microphoneUsers.value > 0) break
                     check(count > 0) { "Ошибка записи микрофона: $count" }
                     samplesRead += count
                     lastSampleAt = SystemClock.elapsedRealtime()
@@ -278,7 +290,7 @@ class VoiceControlService : Service() {
         runCatching { recorder?.stop() }
         wakeLock?.let { if (it.isHeld) it.release() }
         mutableStatus.update {
-            it.copy(active = false, loading = false,
+            it.copy(active = false, loading = false, microphoneBorrowed = false,
                 message = if (it.active || it.loading) "Остановлено" else it.message)
         }
         super.onDestroy()
@@ -292,6 +304,7 @@ class VoiceControlService : Service() {
         writer.println("lastCommandDurationMs=$lastCommandDurationMs")
         writer.println("attemptedCommand=$attemptedCommand lastCommandError=$lastCommandError")
         writer.println("captureRestarts=$captureRestarts silenced=$microphoneSilenced lastCaptureIssue=$lastCaptureIssue")
+        writer.println("microphoneBorrowers=${microphoneUsers.value} borrowed=${status.value.microphoneBorrowed}")
     }
 
     companion object {
@@ -331,6 +344,18 @@ class VoiceControlService : Service() {
         private const val NOTIFICATION = 32
         private val mutableStatus = MutableStateFlow(VoiceControlStatus())
         internal val status = mutableStatus.asStateFlow()
+        private val microphoneLock = Mutex()
+        private val microphoneUsers = MutableStateFlow(0)
+
+        /** Release the recognizer's recorder before another mode starts capture. */
+        internal suspend fun <T> withMicrophone(block: suspend () -> T): T {
+            microphoneUsers.update { it + 1 }
+            try {
+                return microphoneLock.withLock { block() }
+            } finally {
+                microphoneUsers.update { it - 1 }
+            }
+        }
 
         fun enabled(context: Context): Boolean = context.getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(ENABLED, false)
 

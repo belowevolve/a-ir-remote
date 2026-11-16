@@ -8,6 +8,8 @@ import java.io.File
 internal object VoiceFeature {
     const val available = false
     const val active = false
+
+    suspend fun <T> withMicrophone(block: suspend () -> T): T = block()
     private var cleaned = false
 
     fun restore(context: Context) {

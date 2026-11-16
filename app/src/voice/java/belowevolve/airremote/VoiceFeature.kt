@@ -7,6 +7,8 @@ internal object VoiceFeature {
     const val available = true
     val active: Boolean get() = VoiceControlService.status.value.active
 
+    suspend fun <T> withMicrophone(block: suspend () -> T): T = VoiceControlService.withMicrophone(block)
+
     fun restore(context: Context) {
         if (VoiceControlService.enabled(context)) VoiceControlService.start(context)
     }

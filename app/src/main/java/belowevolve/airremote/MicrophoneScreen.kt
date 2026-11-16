@@ -128,6 +128,8 @@ fun MicrophoneScreen(model: PcRemoteModel, beforeStart: () -> Unit) {
                     }
                 }
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+                if (state.failed && !model.waveformEnabled)
+                    Text(state.message, color = MaterialTheme.colorScheme.error)
                 Box(pointer.weight(1f).fillMaxWidth()) {
                     if (model.waveformEnabled) MicrophoneMonitor(Modifier.fillMaxSize())
 

@@ -61,6 +61,9 @@ class MicrophoneService : Service() {
         private const val NOTIFICATION = 48
 
         fun start(context: Context, natural: Boolean) {
+            check(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                "Нет доступа к микрофону"
+            }
             context.startForegroundService(
                 Intent(context, MicrophoneService::class.java)
                     .putExtra("natural", natural),
@@ -103,17 +106,14 @@ class MicrophoneService : Service() {
         if (session != null) return START_NOT_STICKY
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
         try {
-            check(!VoiceFeature.active) {
-                "Сначала останови голосовое управление в настройках ТВ"
-            }
-            check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                "Нет доступа к микрофону"
-            }
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL, "Микрофон для ПК", NotificationManager.IMPORTANCE_LOW))
             mutableStatus.value = MicStatus(active = true, message = "Подключение…")
             if (Build.VERSION.SDK_INT >= 30) startForeground(NOTIFICATION, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             else startForeground(NOTIFICATION, notification())
+            check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                "Нет доступа к микрофону"
+            }
             wakeLock = getSystemService(PowerManager::class.java).newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, "AirRemote:Microphone").apply {
                     setReferenceCounted(false)
@@ -129,7 +129,7 @@ class MicrophoneService : Service() {
             val natural = intent.getBooleanExtra("natural", true)
             session = scope.launch {
                 var failure: String? = null
-                try { stream(endpoint, natural) }
+                try { VoiceFeature.withMicrophone { stream(endpoint, natural) } }
                 catch (_: CancellationException) { }
                 catch (e: Exception) { failure = streamFailure ?: e.message ?: "Соединение прервано" }
                 finally {
@@ -341,6 +341,13 @@ class MicrophoneService : Service() {
     }
     private fun notifyStatus() { getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification()) }
     private fun closeSocket() { runCatching { socket?.close() }; socket = null }
+
+    override fun dump(fd: java.io.FileDescriptor?, writer: java.io.PrintWriter, args: Array<out String>?) {
+        val state = status.value
+        writer.println("Microphone active=${state.active} streaming=${state.streaming} muted=${state.muted} failed=${state.failed}")
+        writer.println("sentFrames=${state.sentFrames} dropped=${state.dropped} recorderState=${recorder?.recordingState}")
+        writer.println("message=${state.message}")
+    }
 
     override fun onDestroy() {
         destroyed = true
