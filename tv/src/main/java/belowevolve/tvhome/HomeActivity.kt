@@ -22,6 +22,7 @@ class HomeActivity : QuietActivity() {
   private var posters by mutableStateOf(emptyList<PosterArt>())
   private var clock by mutableStateOf("")
   private var vpn by mutableStateOf(false)
+  private val vpnNetworks = mutableSetOf<Network>()
   private var focusRequest by mutableIntStateOf(0)
   private var appearance by mutableIntStateOf(0)
   private var appearanceKey = ""
@@ -57,21 +58,21 @@ class HomeActivity : QuietActivity() {
     }
   private val network =
     object : ConnectivityManager.NetworkCallback() {
-      override fun onAvailable(n: Network) {
-        updateVpn()
-      }
-
       override fun onLost(n: Network) {
+        vpnNetworks.remove(n)
         updateVpn()
       }
 
       override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) {
+        if (c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) vpnNetworks.add(n)
+        else vpnNetworks.remove(n)
         updateVpn()
       }
     }
 
   private fun updateVpn() {
-    main.post { vpn = SettingsActivity.vpnOn(this) }
+    // Callback arguments are ordered; querying ConnectivityManager here can return a lost VPN.
+    vpn = vpnNetworks.isNotEmpty()
   }
 
   override fun onCreate(state: Bundle?) {
@@ -243,10 +244,14 @@ class HomeActivity : QuietActivity() {
 
   override fun onStart() {
     super.onStart()
-    getSystemService(ConnectivityManager::class.java)
+    val connectivity = getSystemService(ConnectivityManager::class.java)
+    vpnNetworks.clear()
+    updateVpn()
+    connectivity
       .registerNetworkCallback(
         NetworkRequest.Builder()
           .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+          .addTransportType(NetworkCapabilities.TRANSPORT_VPN)
           .build(),
         network,
         main,
@@ -294,7 +299,6 @@ class HomeActivity : QuietActivity() {
       // Warm any GPU textures released while hidden, before the first navigation key.
       window.decorView.postInvalidateOnAnimation()
     }
-    updateVpn()
     main.removeCallbacks(tick)
     tick.run()
     loadPrograms()
