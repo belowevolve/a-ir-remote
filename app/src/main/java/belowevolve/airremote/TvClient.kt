@@ -53,7 +53,7 @@ class TvClient(private val identity: TvIdentity, initialPort: Int = 6466) {
             }
             s.tcpNoDelay = true
             s.keepAlive = true
-            s.soTimeout = 12000
+            s.soTimeout = if (pairing) 12000 else if (port == 6465) 3000 else 5000
             s.connect(InetSocketAddress(host, port), if (port == 6465) 1500 else 5000)
             trace("tcp")
             s.startHandshake()

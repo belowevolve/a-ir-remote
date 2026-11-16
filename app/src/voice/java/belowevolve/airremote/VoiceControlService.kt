@@ -35,7 +35,14 @@ internal data class VoiceControlStatus(
     val active: Boolean = false,
     val loading: Boolean = false,
     val message: String = "Выключено",
-)
+    val tvError: String? = null,
+    val commandFailed: Boolean = false,
+    val microphoneUnavailable: Boolean = false,
+) {
+    val description: String get() = if (active && !loading && !microphoneUnavailable && tvError != null && !commandFailed)
+        "Слушаю. $tvError" else message
+    val hasError: Boolean get() = tvError != null || commandFailed || microphoneUnavailable
+}
 
 /** User-enabled local listening; the notification always exposes an immediate stop action. */
 class VoiceControlService : Service() {
@@ -88,7 +95,18 @@ class VoiceControlService : Service() {
             ).apply { setReferenceCounted(false); acquire() }
             scope.launch {
                 try {
-                    tv = VoiceTvController(this@VoiceControlService, scope)
+                    tv = VoiceTvController(this@VoiceControlService, scope) { error ->
+                        val before = mutableStatus.value
+                        if (before.tvError != error) {
+                            mutableStatus.update {
+                                if (error == null && it.tvError != null && !it.loading &&
+                                    !it.microphoneUnavailable && !commandRunning.get())
+                                    it.copy(tvError = null, commandFailed = false, message = "Слушаю команды")
+                                else it.copy(tvError = error)
+                            }
+                            notifyStatus()
+                        }
+                    }
                     if (BuildConfig.DEBUG) regressionController = tv
                     capture()
                 } catch (_: CancellationException) { }
@@ -123,8 +141,8 @@ class VoiceControlService : Service() {
                     currentCoroutineContext().ensureActive()
                     lastCaptureIssue = error.message ?: error.javaClass.simpleName
                     Log.w(TAG, "Reopening microphone: $lastCaptureIssue")
-                    mutableStatus.value = VoiceControlStatus(active = true, loading = true,
-                        message = "Восстанавливаю микрофон…")
+                    mutableStatus.update { it.copy(active = true, loading = true,
+                        message = "Восстанавливаю микрофон…") }
                     notifyStatus()
                     delay(retryDelay)
                     captureRestarts++
@@ -153,7 +171,8 @@ class VoiceControlService : Service() {
                 if (!currentCoroutineContext().isActive) return
                 input.startRecording()
                 check(input.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Не удалось включить микрофон" }
-                mutableStatus.value = VoiceControlStatus(active = true, message = "Слушаю команды")
+                mutableStatus.update { it.copy(active = true, loading = false,
+                    microphoneUnavailable = false, message = "Слушаю команды") }
                 notifyStatus()
                 val samples = ShortArray(OfflineVoiceRecognizer.FRAME_SAMPLES)
                 var lastSilenceCheck = 0L
@@ -177,9 +196,9 @@ class VoiceControlService : Service() {
                             recognizer.reset()
                             wasSilenced = silenced
                             if (silenced) lastCaptureIssue = "Microphone temporarily silenced by Android"
-                            mutableStatus.value = VoiceControlStatus(active = true, message = if (silenced)
+                            mutableStatus.update { it.copy(active = true, microphoneUnavailable = silenced, message = if (silenced)
                                 "Микрофон недоступен. Жду…"
-                                else "Слушаю команды")
+                                else "Слушаю команды") }
                             Log.i(TAG, "Microphone silenced=$silenced")
                             notifyStatus()
                         }
@@ -216,7 +235,7 @@ class VoiceControlService : Service() {
                     ?: command.volumeSteps.takeIf { it != 1 }?.let { ":${it}steps" } ?: "")
                 completedCommands++
                 Log.i(TAG, "$command completed in ${elapsed}ms")
-                mutableStatus.update { it.copy(message = result) }
+                mutableStatus.update { it.copy(message = result, commandFailed = false) }
                 notifyStatus()
                 @Suppress("DEPRECATION")
                 getSystemService(android.os.Vibrator::class.java)?.vibrate(
@@ -226,7 +245,7 @@ class VoiceControlService : Service() {
             catch (error: Exception) {
                 lastCommandError = error.message ?: error.javaClass.simpleName
                 Log.w(TAG, "$command failed", error)
-                mutableStatus.update { it.copy(message = error.message ?: "Не удалось выполнить команду") }
+                mutableStatus.update { it.copy(message = error.message ?: "Не удалось выполнить команду", commandFailed = true) }
                 notifyStatus()
             } finally { commandRunning.set(false) }
         }
@@ -238,7 +257,7 @@ class VoiceControlService : Service() {
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_remote_monochrome)
             .setContentTitle("Эйр слушает команды")
-            .setContentText(mutableStatus.value.message)
+            .setContentText(mutableStatus.value.description)
             .setContentIntent(open)
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)

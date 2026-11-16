@@ -33,6 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class RemoteModel(app: Application) : AndroidViewModel(app) {
     var status by mutableStateOf(value = "ТВ не выбран")
@@ -76,11 +77,16 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var connectionGeneration = 0L
     private var networkPowerHeld = false
     private var networkOkHeld = false
+    private var wakeDeadline = 0L
+    private val reconnectSignal = Channel<Unit>(Channel.CONFLATED)
 
     private data class TvCommand(val generation: Long, val wake: Boolean, val action: TvClient.() -> Unit)
     private val commands = Channel<TvCommand>(Channel.UNLIMITED)
 
     val devices = mutableStateListOf<Pair<String, String>>()
+    var discovering by mutableStateOf(false)
+        private set
+    private var discoveryStatusJob: Job? = null
     private val prefs = app.getSharedPreferences("remote", Context.MODE_PRIVATE)
     var autoKeyboard by mutableStateOf(prefs.getBoolean("auto_keyboard", true))
         private set
@@ -109,7 +115,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     val hasIr = ir?.hasIrEmitter() == true
     
     private val identity by lazy { TvIdentity(app) }
-    private val client by lazy { initialized = true; TvClient(identity) }
+    private val client by lazy { initialized = true; TvClient(identity, initialPort = 6465) }
     
     private var connectionJob: Job? = null
     private var pairingJob: Job? = null
@@ -130,6 +136,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
 
     init {
         connectionNeedsAttention = host.isNotBlank() && !prefs.getBoolean("auto_connect", true)
+        if (hasSelectedTv) status = if (connectionNeedsAttention) "ТВ отключён" else "Подключение…"
         if (host.isNotBlank() && prefs.contains("ir") && !prefs.contains("ir_host")) {
             prefs.edit { putString("ir_host", host) }
         }
@@ -254,12 +261,23 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun discover() {
         if (discovery != null) return
         devices.clear()
+        discovering = true
+        discoveryStatusJob?.cancel()
+        discoveryStatusJob = viewModelScope.launch {
+            delay(5.seconds)
+            discovering = false
+        }
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(type: String) = Unit
             override fun onDiscoveryStopped(type: String) = Unit
             override fun onStartDiscoveryFailed(type: String, code: Int) {
                 val owner = this
-                viewModelScope.launch { if (discovery === owner) discovery = null }
+                viewModelScope.launch {
+                    if (discovery === owner) {
+                        discovery = null
+                        discovering = false
+                    }
+                }
             }
             override fun onStopDiscoveryFailed(type: String, code: Int) = Unit
             override fun onServiceLost(service: NsdServiceInfo) {
@@ -296,6 +314,8 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun stopDiscovery() {
+        discoveryStatusJob?.cancel()
+        discovering = false
         discovery?.let { runCatching { nsd.stopServiceDiscovery(it) } }
         discovery = null
     }
@@ -418,6 +438,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun disconnect() {
+        wakeDeadline = 0L
         prefs.edit { putBoolean("auto_connect", false) }
         closeConnection()
         status = "ТВ отключён"
@@ -449,14 +470,25 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun connect(wake: Boolean = false) {
         if (host.isBlank()) return
         prefs.edit { putBoolean("auto_connect", true) }
-        if (wake && foreground) closeConnection()
-        if (!foreground || (connectionJob?.isActive == true)) return
+        if (wake) {
+            wakeDeadline = android.os.SystemClock.elapsedRealtime() + 30000
+            if (connected) {
+                wakeDeadline = 0L
+                enqueue {}
+                return
+            }
+        }
+        if (!foreground) return
+        if (connectionJob?.isActive == true) {
+            if (!connected) reconnectSignal.trySend(Unit)
+            return
+        }
         connecting = true
+        connectionNeedsAttention = false
+        status = "Подключение…"
         connectionJob = viewModelScope.launch {
             val owner = currentCoroutineContext()[Job]
             try {
-                var wakePending = wake
-                val wakeDeadline = android.os.SystemClock.elapsedRealtime() + 30000
                 val paired = withContext(Dispatchers.IO) { identity.hasPin(host) }
                 if (!paired) {
                     connecting = false
@@ -469,7 +501,6 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                 // A retry delay may finish after the activity has gone to the background.
                 // Keep an existing listen() alive, but only start new sessions while visible.
                 while (isActive && foreground) {
-                    status = "Подключение…"
                     val generation = connectionGeneration
                     try {
                         withContext(Dispatchers.IO) {
@@ -504,9 +535,11 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                                             deviceDialog = TvDeviceDialogState.CLOSED
                                         connectionNeedsAttention = false
                                         reconnectAttempts = 0
+                                        while (reconnectSignal.tryReceive().isSuccess) { }
                                         status = "Подключён по Wi-Fi"
-                                        if (wakePending) {
-                                            wakePending = false
+                                        val shouldWake = wakeDeadline > android.os.SystemClock.elapsedRealtime()
+                                        wakeDeadline = 0L
+                                        if (shouldWake) {
                                             // Recheck power when this queued command executes: a
                                             // physical remote may have already woken the screen.
                                             enqueue {}
@@ -521,17 +554,19 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                         // connection has started. Its result must not reset the new session.
                         if (!currentCoroutineContext().isActive || generation != connectionGeneration) return@launch
                         Log.w("AirRemote", "TV disconnected", e)
+                        val wasConnected = connected
                         connected = false
-                        connecting = true
-                        connectionNeedsAttention = true
+                        connecting = wasConnected
+                        connectionNeedsAttention = !wasConnected
                         resetConnectionState()
-                        status = "ТВ недоступен"
+                        status = if (wasConnected) "Восстанавливаю связь…" else tvConnectionError(e)
+                        if (deviceDialog == TvDeviceDialogState.CONNECTING)
+                            deviceDialog = TvDeviceDialogState.SETTINGS
                         // A lost background session is retried when the app returns.
                         if (!foreground) break
-                        if (wakePending && android.os.SystemClock.elapsedRealtime() >= wakeDeadline) {
-                            connecting = false
+                        if (wakeDeadline != 0L && android.os.SystemClock.elapsedRealtime() >= wakeDeadline) {
+                            wakeDeadline = 0L
                             message = "ТВ не отвечает. Сетевой режим ожидания может быть отключён"
-                            break
                         }
                     }
                     val retryDelay = when (reconnectAttempts++) {
@@ -539,7 +574,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
                         1 -> 1.seconds
                         else -> 3.seconds
                     }
-                    delay(retryDelay)
+                    withTimeoutOrNull(retryDelay) { reconnectSignal.receive() }
                 }
             } finally {
                 if (connectionJob === owner) connecting = false
@@ -555,7 +590,10 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     // Buttons must not turn automatic reconnection into a manual device picker.
     internal fun requireConnection(): Boolean {
         if (connected) return true
-        if (!connecting) showDeviceDialog()
+        if (hasSelectedTv && connectionJob?.isActive == true) {
+            reconnectSignal.trySend(Unit)
+            if (connectionNeedsAttention) message = status
+        } else if (!connecting) showDeviceDialog()
         return false
     }
 
@@ -594,7 +632,7 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
         if (!connected) {
             // IR supports a short power toggle only. Use it to wake an offline
             // TV; a connected TV must receive real network hold/release edges.
-            if (hasIr && powerSignal != null) powerIr() else requireConnection()
+            if (hasIr && powerSignal != null) powerIr() else wakeSavedTv()
             return
         }
         networkPowerHeld = true
@@ -604,7 +642,11 @@ class RemoteModel(app: Application) : AndroidViewModel(app) {
     fun power() {
         if (hasIr && powerSignal != null) { powerIr(); return }
         if (connected) { key(26); return }
-        requireConnection()
+        wakeSavedTv()
+    }
+
+    private fun wakeSavedTv() {
+        if (hasSelectedTv) connect(wake = true) else showDeviceDialog()
     }
 
     fun powerIr() {

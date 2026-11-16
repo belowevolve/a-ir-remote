@@ -14,11 +14,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 
 private const val VOICE_TV_TAG = "AirRemoteVoice"
 
 /** Keeps the authenticated remote ready while the microphone service owns the session. */
-internal class VoiceTvController(context: Context, scope: CoroutineScope) : AutoCloseable {
+internal class VoiceTvController(
+    context: Context,
+    scope: CoroutineScope,
+    private val onConnectionChanged: (String?) -> Unit = {},
+) : AutoCloseable {
     private val context = context.applicationContext
     private val prefs = context.getSharedPreferences("remote", Context.MODE_PRIVATE)
     private val identity = TvIdentity(context)
@@ -33,8 +40,11 @@ internal class VoiceTvController(context: Context, scope: CoroutineScope) : Auto
     @Volatile private var preferredPort: Int? = null
     private var lastSleepRequestAt = Long.MIN_VALUE
     private val reconnectSignal = Channel<Unit>(Channel.CONFLATED)
+    private val stateChanged = MutableStateFlow(0L)
+    @Volatile private var connectionError: String? = null
+    @Volatile private var failureRevision = 0L
     private val preferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "host") client.close()
+        if (key == "host") reconnectNow()
     }.also(prefs::registerOnSharedPreferenceChangeListener)
     private val reader = scope.launch(Dispatchers.IO) {
         while (isActive) {
@@ -48,18 +58,38 @@ internal class VoiceTvController(context: Context, scope: CoroutineScope) : Auto
                         screenOn = on
                         powerRevision++
                         pending.complete(Unit)
+                        connectionError = null
+                        stateChanged.update { it + 1 }
+                        onConnectionChanged(null)
                     }, preferredPort = preferredPort)
+                } else {
+                    connectionError = "Сначала подключите телевизор в пульте"
+                    failureRevision++
+                    onConnectionChanged(connectionError)
                 }
             } catch (error: CancellationException) {
                 if (!currentCoroutineContext().isActive) throw error
             }
-            catch (error: Exception) { android.util.Log.d(VOICE_TV_TAG, "TV connection unavailable", error) }
+            catch (error: Exception) {
+                val wasReady = pending.isCompleted
+                ready = CompletableDeferred()
+                connectedHost = ""
+                connectionError = tvConnectionError(error)
+                // A dropped session gets one immediate reconnect before reporting
+                // an outage. Healthy app/standby transitions stay quiet.
+                if (!wasReady) {
+                    failureRevision++
+                    onConnectionChanged(connectionError)
+                }
+                android.util.Log.d(VOICE_TV_TAG, "TV connection unavailable", error)
+            }
             finally {
                 ready = CompletableDeferred()
                 connectedHost = ""
                 client.close()
+                stateChanged.update { it + 1 }
             }
-            withTimeoutOrNull(3_000) { reconnectSignal.receive() }
+            if (!pending.isCompleted) withTimeoutOrNull(3_000) { reconnectSignal.receive() }
         }
     }
 
@@ -102,18 +132,20 @@ internal class VoiceTvController(context: Context, scope: CoroutineScope) : Auto
         ready = CompletableDeferred()
         connectedHost = ""
         client.close()
+        stateChanged.update { it + 1 }
         reconnectSignal.trySend(Unit)
     }
 
     private suspend fun awaitConnection(host: String) {
-        check(withTimeoutOrNull(20_000) {
-            while (!ready.isCompleted || connectedHost != host) delay(10)
-            true
-        } == true) {
-            if (lastSleepRequestAt != Long.MIN_VALUE)
-                "После команды выключения ТВ не отвечает по сети. Проверьте сетевой режим ожидания или включите ТВ ИК-пультом"
-            else "Нет соединения с ТВ по сети. Проверьте питание и Wi-Fi"
+        if (ready.isCompleted && connectedHost == host) return
+        val failedBefore = failureRevision
+        // Commands interrupt retry backoff; a healthy session needs no extra handshake.
+        reconnectSignal.trySend(Unit)
+        val signalled = withTimeoutOrNull(20_000) {
+            stateChanged.first { (ready.isCompleted && connectedHost == host) || failureRevision != failedBefore }
         }
+        if (signalled == null || !ready.isCompleted || connectedHost != host)
+            throw IOException(connectionError ?: "ТВ недоступен. Проверьте питание и Wi-Fi")
     }
 
     private suspend fun executeConnected(request: VoiceCommandRequest): String {
@@ -150,7 +182,7 @@ internal class VoiceTvController(context: Context, scope: CoroutineScope) : Auto
             client.sendKey(26)
             if (!expectedOn) lastSleepRequestAt = android.os.SystemClock.elapsedRealtime()
             val report = withTimeoutOrNull(5_000) {
-                while (powerRevision == revision && ready.isCompleted && connectedHost == host) delay(25)
+                stateChanged.first { powerRevision != revision || !ready.isCompleted || connectedHost != host }
                 if (powerRevision != revision) screenOn else null
             }
             // A TV may close its network session before acknowledging standby.
@@ -188,7 +220,7 @@ internal class VoiceTvController(context: Context, scope: CoroutineScope) : Auto
         confirmedPlan.appLink?.let { link ->
             // Await the screen-on acknowledgement before sending the launch, even from standby.
             if (withTimeoutOrNull(1_000) {
-                while (!screenOn) delay(10)
+                stateChanged.first { screenOn }
                 true
             } != true) throw SocketTimeoutException("ТВ не подтвердил включение экрана")
             client.launchAppLink(link)

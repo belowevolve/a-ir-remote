@@ -82,9 +82,9 @@ internal fun VoiceControlDialog(hasTv: Boolean, onDismiss: () -> Unit) {
                             Text(when {
                                 !hasTv -> "Сначала подключите телевизор."
                                 permissionError -> "Разрешите доступ к микрофону."
-                                else -> state.message
+                                else -> state.description
                             }, style = MaterialTheme.typography.bodySmall,
-                                color = if (permissionError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = if (permissionError || state.hasError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(listening, onCheckedChange = null, enabled = listeningAllowed)
                     }

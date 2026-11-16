@@ -46,6 +46,7 @@ internal fun PcDeviceDialog(
     var navigation by
         rememberSaveable(stateSaver = saver) { mutableStateOf(PcDialogNavigation(initialPage)) }
     val page = navigation.page
+    val bluetoothAllowed = model.hasPermission()
     var waitingForBluetooth by rememberSaveable { mutableStateOf(false) }
     var scanningCompanion by rememberSaveable { mutableStateOf(!model.companionConnected) }
     var code by rememberSaveable { mutableStateOf("") }
@@ -97,7 +98,6 @@ internal fun PcDeviceDialog(
     }
     LaunchedEffect(page) {
         if (page == PcDialogPage.BLUETOOTH && model.hasPermission()) {
-            model.refreshDevices()
             model.start()
         }
     }
@@ -171,7 +171,6 @@ internal fun PcDeviceDialog(
                                         if (model.companionConnected) "Компаньон подключён"
                                         else "Подключить компаньон",
                                         selected = model.companionConnected,
-                                        enabled = !model.companionConnected,
                                         loading = model.companionConnecting && !model.companionConnected,
                                     ) {
                                         open(PcDialogPage.COMPANION)
@@ -181,9 +180,9 @@ internal fun PcDeviceDialog(
                                     "Bluetooth · клавиатура и мышь",
                                     style = MaterialTheme.typography.titleSmall,
                                 )
-                                if (!model.hasPermission())
-                                    TextButton(
-                                        onClick = {
+                                if (!bluetoothAllowed)
+                                    DialogActionGroup {
+                                        DialogActionRow("Разрешить Bluetooth") {
                                             permissions.launch(
                                                 arrayOf(
                                                     Manifest.permission.BLUETOOTH_CONNECT,
@@ -191,76 +190,80 @@ internal fun PcDeviceDialog(
                                                 )
                                             )
                                         }
-                                    ) {
-                                        Text("Разрешить Bluetooth")
                                     }
-                                if (model.connectionError.isNotBlank())
+                                if (bluetoothAllowed &&
+                                    (model.bluetoothState == BluetoothAdapter.STATE_ON || model.bluetoothState == BluetoothAdapter.ERROR) &&
+                                    model.connectionError.isNotBlank())
                                     Text(model.connectionError, color = MaterialTheme.colorScheme.error)
-                                if (model.bluetoothState == BluetoothAdapter.STATE_OFF)
-                                    TextButton(
-                                        onClick = {
+                                if (bluetoothAllowed && model.bluetoothState == BluetoothAdapter.STATE_OFF)
+                                    DialogActionGroup {
+                                        DialogActionRow("Включить Bluetooth") {
                                             launchBluetooth(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
                                         }
-                                    ) {
-                                        Text("Включить Bluetooth")
                                     }
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
-                                ) {
-                                    FilledTonalButton(
-                                        modifier = Modifier.weight(1.6f),
-                                        contentPadding = PaddingValues(horizontal = RemoteLayout.Gap),
-                                        enabled = model.registered,
-                                        onClick = {
-                                            if (
-                                                Build.VERSION.SDK_INT >= 31 &&
-                                                    context.checkSelfPermission(
-                                                        Manifest.permission.BLUETOOTH_ADVERTISE
-                                                    ) !=
-                                                        android.content.pm.PackageManager.PERMISSION_GRANTED
-                                            )
-                                                permissions.launch(
-                                                    arrayOf(
-                                                        Manifest.permission.BLUETOOTH_CONNECT,
-                                                        Manifest.permission.BLUETOOTH_ADVERTISE,
-                                                    )
+                                if (bluetoothAllowed && model.bluetoothState == BluetoothAdapter.STATE_TURNING_ON)
+                                    Text("Bluetooth включается…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (bluetoothAllowed && model.bluetoothState == BluetoothAdapter.STATE_TURNING_OFF)
+                                    Text("Bluetooth выключается…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (bluetoothAllowed && model.bluetoothState == BluetoothAdapter.STATE_ON) {
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(RemoteLayout.SmallGap),
+                                    ) {
+                                        FilledTonalButton(
+                                            modifier = Modifier.weight(1.6f),
+                                            contentPadding = PaddingValues(horizontal = RemoteLayout.Gap),
+                                            enabled = model.registered,
+                                            onClick = {
+                                                if (
+                                                    Build.VERSION.SDK_INT >= 31 &&
+                                                        context.checkSelfPermission(
+                                                            Manifest.permission.BLUETOOTH_ADVERTISE
+                                                        ) !=
+                                                            android.content.pm.PackageManager.PERMISSION_GRANTED
                                                 )
-                                            else {
-                                                model.preparePairing()
-                                                waitingForBluetooth = true
-                                                launchBluetooth(
-                                                    Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
-                                                        .putExtra(
-                                                            BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION,
-                                                            120,
+                                                    permissions.launch(
+                                                        arrayOf(
+                                                            Manifest.permission.BLUETOOTH_CONNECT,
+                                                            Manifest.permission.BLUETOOTH_ADVERTISE,
                                                         )
-                                                )
-                                            }
-                                        },
-                                    ) {
-                                        Text("Видимость · 2 мин")
+                                                    )
+                                                else {
+                                                    model.preparePairing()
+                                                    waitingForBluetooth = true
+                                                    launchBluetooth(
+                                                        Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+                                                            .putExtra(
+                                                                BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION,
+                                                                120,
+                                                            )
+                                                    )
+                                                }
+                                            },
+                                        ) {
+                                            Text("Видимость · 2 мин")
+                                        }
+                                        OutlinedButton(
+                                            modifier = Modifier.weight(1f),
+                                            contentPadding = PaddingValues(horizontal = RemoteLayout.Gap),
+                                            onClick = model::start,
+                                        ) {
+                                            Text("Обновить")
+                                        }
                                     }
-                                    OutlinedButton(
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = RemoteLayout.Gap),
-                                        onClick = model::start,
-                                    ) {
-                                        Text("Обновить")
+                                    DeviceConnectionList(
+                                        devices = model.devices,
+                                        loading = model.loadingDevices,
+                                        label = model::deviceLabel,
+                                        connected = { model.connected && model.isSelectedDevice(it) },
+                                        connecting = model::isConnectingDevice,
+                                        enabled = model.registered,
+                                    ) { device ->
+                                        waitingForBluetooth = true
+                                        model.connect(device)
                                     }
                                 }
                                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
-                                DeviceConnectionList(
-                                    devices = model.devices,
-                                    loading = model.loadingDevices,
-                                    label = model::deviceLabel,
-                                    connected = { model.connected && model.isSelectedDevice(it) },
-                                    connecting = model::isConnectingDevice,
-                                    enabled = model.registered,
-                                ) { device ->
-                                    waitingForBluetooth = true
-                                    model.connect(device)
-                                }
                             }
                         PcDialogPage.COMPANION,
                         PcDialogPage.COMPANION_CODE ->

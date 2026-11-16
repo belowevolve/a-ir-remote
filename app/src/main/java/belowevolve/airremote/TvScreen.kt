@@ -100,6 +100,10 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 ) {
                     model.showDeviceDialog()
                 }
+                if (model.connectionNeedsAttention && model.hasSelectedTv) {
+                    Text(model.status, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -280,7 +284,7 @@ internal fun RemoteScreen(model: RemoteModel, voice: () -> Unit) {
                 } else {
                     DeviceConnectionList(
                         devices = model.devices,
-                        loading = model.devices.isEmpty(),
+                        loading = model.discovering,
                         label = { it.first },
                         connected = { model.connected && it.second == model.host },
                         connecting = { (screen.busy || model.connecting) && it.second == model.host },
