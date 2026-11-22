@@ -9,7 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 
-/** Keeps the HID client's UID foreground while its Bluetooth connection is in use. */
+/** Keeps HID registered during a Bluetooth session, including reconnection to the selected PC. */
 class PcConnectionService : Service() {
     override fun onCreate() {
         super.onCreate()

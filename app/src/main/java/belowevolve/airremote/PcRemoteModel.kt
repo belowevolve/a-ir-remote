@@ -51,6 +51,8 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     private var output: PcHidOutput? = null
     private var reconnectJob: Job? = null
     private var keepingConnection = false
+    private val canMaintainHid: Boolean
+        get() = !closed && selection.allowed && ((foreground && enabled) || keepingConnection)
     private var keyboardLeds = 0
     var capsLock by mutableStateOf(false)
         private set
@@ -517,12 +519,11 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             registered = isRegistered
             registering = false
             if (!isRegistered) {
-                stopKeepingConnection()
                 clearConnection()
                 disconnectingHost = null
                 connectionError = "Служба клавиатуры отключена"
                 scheduleReconnect()
-            } else if (closed || (!foreground && !keepingConnection) || (!enabled && !connected)) {
+            } else if (!canMaintainHid) {
                 safely { hid?.unregisterApp() }
             } else {
                 connectionError = ""
@@ -585,10 +586,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                         val next = pendingHost
                         pendingHost = null
                         if (next != null && selection.accepts(next.address)) connect(next)
-                        else {
-                            stopKeepingConnection()
-                            scheduleReconnect()
-                        }
+                        else scheduleReconnect()
                     }
                 }
             }
@@ -636,11 +634,13 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun scheduleReconnect() {
-        if (reconnectJob?.isActive == true || !foreground || !enabled || !selection.allowed || connected) return
+        if (reconnectJob?.isActive == true || !canMaintainHid || selection.address == null || connected) return
         reconnectJob = viewModelScope.launch {
-            for (wait in listOf(500L, 1000L, 2000L, 4000L, 8000L)) {
+            var wait = 500L
+            while (canMaintainHid && selection.address != null && !connected) {
                 delay(wait)
-                if (!foreground || !enabled || !selection.allowed || connected || closed) break
+                if (!canMaintainHid || connected) break
+                wait = (wait * 2).coerceAtMost(8000L)
                 safely {
                     if (!hasPermission() || adapter?.isEnabled != true) return@safely
                     if (!registered) start()
@@ -661,10 +661,9 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             if (closed) { adapter?.closeProfileProxy(profile, proxy); return }
             requesting = false
             hid = proxy as BluetoothHidDevice
-            if (foreground && enabled) register()
+            if (canMaintainHid) register()
         }
         override fun onServiceDisconnected(profile: Int) {
-            stopKeepingConnection()
             clearConnection()
             hid = null
             requesting = false
@@ -680,7 +679,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
             if (intent.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) refreshDevices()
             if (intent.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
                 refreshBluetoothState()
-                if (foreground && enabled) start()
+                if (canMaintainHid) { start(); scheduleReconnect() }
             }
         }
     }
@@ -691,9 +690,9 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resume() { foreground = true; refreshBluetoothState(); if (enabled) { companion.start(); start(); scheduleReconnect() } }
-    fun pause() { interruptNativeKeyboard("Ввод остановлен. Открой клавиатуру заново."); cancelClipboard(); companion.stop(); releaseInputs(); foreground = false; reconnectJob?.cancel() }
+    fun pause() { interruptNativeKeyboard("Ввод остановлен. Открой клавиатуру заново."); cancelClipboard(); companion.stop(); releaseInputs(); foreground = false; if (!keepingConnection) reconnectJob?.cancel() }
     fun activate() { enabled = true; companion.start(); start(); scheduleReconnect() }
-    fun deactivate() { interruptNativeKeyboard("Ввод остановлен. Открой клавиатуру заново."); cancelClipboard(); companion.stop(); releaseInputs(); enabled = false; reconnectJob?.cancel() }
+    fun deactivate() { interruptNativeKeyboard("Ввод остановлен. Открой клавиатуру заново."); cancelClipboard(); companion.stop(); releaseInputs(); enabled = false; if (!keepingConnection) reconnectJob?.cancel() }
     fun permissionDenied() { connectingDeviceAddress = null; connectionError = "Нет доступа к устройствам поблизости" }
 
     private fun keepConnection() {
@@ -731,7 +730,10 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         }
     }
     private fun register(): Unit = safely {
-        if (registered || registering || !enabled || !foreground) return@safely
+        if (registered || registering || !canMaintainHid) return@safely
+        // Preserve registration as well as the connection while the selected PC
+        // sleeps or Bluetooth restarts. Only an explicit disconnect ends it.
+        if (selection.address != null) keepConnection()
         registering = hid?.registerApp(
             BluetoothHidDeviceAppSdpSettings(context.getString(R.string.app_name), "Keyboard and trackpad", "belowevolve",
                 BluetoothHidDevice.SUBCLASS1_COMBO, PcHidReports.descriptor),
@@ -751,7 +753,7 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 devices = withContext(Dispatchers.IO) {
                     adapter?.bondedDevices?.sortedBy { it.name ?: it.address }.orEmpty()
                 }
-                if (foreground && enabled && registered && !connected && host == null && pendingHost == null && selection.allowed)
+                if (canMaintainHid && registered && !connected && host == null && pendingHost == null)
                     devices.firstOrNull { it.address == selection.address }?.let(::connect)
             } catch (e: CancellationException) {
                 throw e
@@ -810,8 +812,8 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
                 BluetoothProfile.STATE_CONNECTED -> callback.onConnectionStateChanged(device, BluetoothProfile.STATE_CONNECTED)
                 else -> {
                     connectingDeviceAddress = null
-                    if (!connected) stopKeepingConnection()
                     connectionError = "Не удалось подключиться к ПК"
+                    scheduleReconnect()
                 }
             }
         }
@@ -885,6 +887,10 @@ class PcRemoteModel(application: Application) : AndroidViewModel(application) {
         modifiers = 0
         dragging = false
         output?.release()
+    }
+    internal fun dump(out: java.io.PrintWriter) {
+        out.println("AirRemote PC registered=$registered registering=$registering connected=$connected foreground=$foreground enabled=$enabled keepingConnection=$keepingConnection")
+        out.println("selected=$hasSelectedDevice autoConnect=${selection.allowed} reconnectJob=${reconnectJob?.isActive == true} bluetoothState=$bluetoothState error=$connectionError")
     }
     override fun onCleared() {
         stopNativeKeyboard()

@@ -85,5 +85,6 @@ class MainActivity : ComponentActivity() {
     ) {
         super.dump(prefix, fd, out, args)
         model.dump(out)
+        pcModel.dump(out)
     }
 }

@@ -131,7 +131,10 @@ class MicrophoneService : Service() {
                 var failure: String? = null
                 try { VoiceFeature.withMicrophone { stream(endpoint, natural) } }
                 catch (_: CancellationException) { }
-                catch (e: Exception) { failure = streamFailure ?: e.message ?: "Соединение прервано" }
+                catch (e: Exception) {
+                    failure = streamFailure ?: e.message ?: "Соединение прервано"
+                    Log.w(LOG_TAG, "Microphone stopped: $failure", e)
+                }
                 finally {
                     closeSocket()
                     withContext(NonCancellable + Dispatchers.Main) {
@@ -193,13 +196,16 @@ class MicrophoneService : Service() {
             if (diagnostics) Log.d(LOG_TAG, "captureBufferMs=${record.bufferSizeInFrames * 1000 / MicTransport.RATE} sendBufferBytes=${connection.sendBufferSize}")
             val started = SystemClock.elapsedRealtime()
             val progress = AtomicLong(started)
+            val captureProgress = AtomicLong(started)
             // Socket SO_TIMEOUT only limits reads. Close a blocked writer explicitly.
             val watchdog = scope.launch {
                 while (isActive) {
                     delay(100.milliseconds)
-                    if (SystemClock.elapsedRealtime() - progress.get() >=
-                        (if (progress.get() == started) 1500 else 500)) {
+                    val stalledFor = SystemClock.elapsedRealtime() - progress.get()
+                    if (stalledFor >= (if (progress.get() == started) 1500 else 500)) {
                         streamFailure = "Сеть или микрофон не отвечает"
+                        val captureStalledFor = SystemClock.elapsedRealtime() - captureProgress.get()
+                        Log.w(LOG_TAG, "Audio stalled: writeMs=$stalledFor captureMs=$captureStalledFor sentFrames=${mutableStatus.value.sentFrames} dropped=${mutableStatus.value.dropped}")
                         runCatching { connection.close() }
                         runCatching { record.stop() }
                         frames.close(java.io.IOException(streamFailure))
@@ -237,6 +243,7 @@ class MicrophoneService : Service() {
                             offset += count
                         }
                         framesRead += samples.size
+                        captureProgress.set(SystemClock.elapsedRealtime())
                         if (timestamp != null && ticks % 100 == 99 &&
                             record.getTimestamp(timestamp, AudioTimestamp.TIMEBASE_MONOTONIC) == AudioRecord.SUCCESS) {
                             // Estimate the age of the last sample using the capture clock, not read completion.
